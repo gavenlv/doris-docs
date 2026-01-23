@@ -6,6 +6,95 @@
 
 ## 集群架构
 
+### 架构图
+
+```mermaid
+graph TB
+    subgraph "外部访问"
+        User[用户/客户端]
+        WebUI[Web UI<br/>http://localhost:8030]
+        MySQL[MySQL客户端<br/>localhost:9030]
+    end
+
+    subgraph "Docker网络 doris_net (172.20.0.0/16)"
+        subgraph "FE 节点"
+            FE1[FE1<br/>172.20.0.11<br/>1CPU / 1GB]
+            FE2[FE2<br/>172.20.0.12<br/>1CPU / 1GB]
+            FE3[FE3<br/>172.20.0.13<br/>1CPU / 1GB]
+        end
+
+        subgraph "BE 节点"
+            BE1[BE1<br/>172.20.0.21<br/>2CPU / 2GB]
+            BE2[BE2<br/>172.20.0.22<br/>2CPU / 2GB]
+            BE3[BE3<br/>172.20.0.23<br/>2CPU / 2GB]
+        end
+    end
+
+    subgraph "端口映射"
+        FE1_Ports[9030:9030<br/>8030:8030<br/>9010:9010]
+        FE2_Ports[9031:9030<br/>8031:8030<br/>9011:9010]
+        FE3_Ports[9032:9030<br/>8032:8030<br/>9012:9010]
+        
+        BE1_Ports[9060:9060<br/>8040:8040<br/>9050:9050]
+        BE2_Ports[9061:9060<br/>8041:8040<br/>9051:9050]
+        BE3_Ports[9062:9060<br/>8042:8040<br/>9052:9050]
+    end
+
+    User -->|MySQL协议| MySQL
+    User -->|HTTP| WebUI
+    
+    MySQL --> FE1
+    WebUI --> FE1
+    
+    FE1 <==>|编辑日志复制<br/>9010| FE2
+    FE1 <==>|编辑日志复制<br/>9010| FE3
+    FE2 <==>|编辑日志复制<br/>9011| FE3
+    
+    FE1 -->|心跳<br/>9050| BE1
+    FE1 -->|心跳<br/>9050| BE2
+    FE1 -->|心跳<br/>9050| BE3
+    
+    FE2 -.->|备用连接| BE1
+    FE2 -.->|备用连接| BE2
+    FE2 -.->|备用连接| BE3
+    
+    FE3 -.->|备用连接| BE1
+    FE3 -.->|备用连接| BE2
+    FE3 -.->|备用连接| BE3
+
+    FE1 -.-> FE1_Ports
+    FE2 -.-> FE2_Ports
+    FE3 -.-> FE3_Ports
+    BE1 -.-> BE1_Ports
+    BE2 -.-> BE2_Ports
+    BE3 -.-> BE3_Ports
+
+    style FE1 fill:#4CAF50,stroke:#2E7D32,stroke-width:3px
+    style FE2 fill:#FFC107,stroke:#FFA000,stroke-width:2px
+    style FE3 fill:#FFC107,stroke:#FFA000,stroke-width:2px
+    style BE1 fill:#2196F3,stroke:#0D47A1,stroke-width:2px
+    style BE2 fill:#2196F3,stroke:#0D47A1,stroke-width:2px
+    style BE3 fill:#2196F3,stroke:#0D47A1,stroke-width:2px
+```
+
+### 节点配置
+
+| 节点 | IP地址 | 角色 | CPU | 内存 | 端口 |
+|------|---------|------|------|------|------|
+| FE1 | 172.20.0.11 | Master | 1核 | 1GB | 9030(MySQL), 8030(HTTP), 9010(编辑日志) |
+| FE2 | 172.20.0.12 | Follower | 1核 | 1GB | 9031(MySQL), 8031(HTTP), 9011(编辑日志) |
+| FE3 | 172.20.0.13 | Follower | 1核 | 1GB | 9032(MySQL), 8032(HTTP), 9012(编辑日志) |
+| BE1 | 172.20.0.21 | Backend | 2核 | 2GB | 9060(BePort), 8040(HttpPort), 9050(心跳) |
+| BE2 | 172.20.0.22 | Backend | 2核 | 2GB | 9061(BePort), 8041(HttpPort), 9051(心跳) |
+| BE3 | 172.20.0.23 | Backend | 2核 | 2GB | 9062(BePort), 8042(HttpPort), 9052(心跳) |
+
+### 网络拓扑
+
+- 所有节点在 `doris_net` 桥接网络中（172.20.0.0/16）
+- FE 节点之间通过编辑日志端口（9010/9011/9012）进行数据复制
+- BE 节点向 FE1 发送心跳（端口9050）
+- 用户通过端口映射访问集群服务
+
 - **FE 节点**: 3 个（高可用）
   - fe1: 172.20.0.11
   - fe2: 172.20.0.12
@@ -25,7 +114,17 @@
 
 ## 快速开始
 
-### 1. 启动集群
+### 1. 配置资源（可选）
+
+如需调整资源限制，编辑 `.env` 文件：
+
+```bash
+# 编辑 .env 文件
+notepad .env  # Windows
+vi .env       # Linux/Mac
+```
+
+### 2. 启动集群
 
 Windows 系统:
 ```bash
@@ -66,10 +165,35 @@ mysql -h 127.0.0.1 -P 9030 -u root
 
 ## 配置说明
 
+### 环境变量配置 (.env)
+
+所有配置参数通过 `.env` 文件统一管理：
+
+```bash
+# 镜像配置
+DORIS_REGISTRY=zlsmshoqvwt6q1.xuanyuan.run
+DORIS_VERSION=4.0.2
+
+# 资源配置（可根据需要调整）
+DORIS_FE_MEMORY=1G
+DORIS_BE_MEMORY=2G
+DORIS_FE_CPUS=1
+DORIS_BE_CPUS=2
+
+# 健康检查配置
+DORIS_HEALTHCHECK_INTERVAL=10s
+DORIS_HEALTHCHECK_TIMEOUT=5s
+DORIS_HEALTHCHECK_RETRIES=5
+DORIS_HEALTHCHECK_START_PERIOD=60s
+
+# 网络配置
+DORIS_NETWORK_SUBNET=172.20.0.0/16
+```
+
 ### FE 配置
 
-- **内存**: 4GB
-- **CPU**: 4核
+- **内存**: 1GB（可通过 .env 调整）
+- **CPU**: 1核（可通过 .env 调整）
 - **端口**:
   - 9030: MySQL 协议端口
   - 8030: HTTP 端口
@@ -77,8 +201,8 @@ mysql -h 127.0.0.1 -P 9030 -u root
 
 ### BE 配置
 
-- **内存**: 8GB
-- **CPU**: 8核
+- **内存**: 2GB（可通过 .env 调整）
+- **CPU**: 2核（可通过 .env 调整）
 - **端口**:
   - 9060: Thrift 端口
   - 8040: Web Server 端口
