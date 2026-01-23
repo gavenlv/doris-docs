@@ -1,8 +1,46 @@
 version: '3.8'
 
+x-fe-common: &fe-common
+  image: ${DORIS_REGISTRY}/apache/doris:fe-${DORIS_VERSION}
+  deploy:
+    resources:
+      limits:
+        cpus: '${DORIS_FE_CPUS}'
+        memory: ${DORIS_FE_MEMORY}
+      reservations:
+        cpus: '${DORIS_FE_RESERVATION_CPUS}'
+        memory: ${DORIS_FE_RESERVATION_MEMORY}
+  healthcheck:
+    test: ["CMD", "mysql", "-h", "127.0.0.1", "-P", "9030", "-u", "root", "-e", "SELECT 1"]
+    interval: ${DORIS_HEALTHCHECK_INTERVAL}
+    timeout: ${DORIS_HEALTHCHECK_TIMEOUT}
+    retries: ${DORIS_HEALTHCHECK_RETRIES}
+    start_period: ${DORIS_HEALTHCHECK_START_PERIOD}
+  restart: unless-stopped
+  privileged: true
+
+x-be-common: &be-common
+  image: ${DORIS_REGISTRY}/apache/doris:be-${DORIS_VERSION}
+  deploy:
+    resources:
+      limits:
+        cpus: '${DORIS_BE_CPUS}'
+        memory: ${DORIS_BE_MEMORY}
+      reservations:
+        cpus: '${DORIS_BE_RESERVATION_CPUS}'
+        memory: ${DORIS_BE_RESERVATION_MEMORY}
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://127.0.0.1:8040/api/health"]
+    interval: ${DORIS_HEALTHCHECK_INTERVAL}
+    timeout: ${DORIS_HEALTHCHECK_TIMEOUT}
+    retries: ${DORIS_HEALTHCHECK_RETRIES}
+    start_period: ${DORIS_HEALTHCHECK_START_PERIOD}
+  restart: unless-stopped
+  privileged: true
+
 services:
   fe1:
-    image: zlsmshoqvwt6q1.xuanyuan.run/apache/doris:fe-${DORIS_VERSION}
+    <<: *fe-common
     container_name: doris_fe1
     hostname: fe1
     ports:
@@ -15,33 +53,13 @@ services:
       - ./fe/fe1/log:/opt/doris/fe/log
     environment:
       - FE_SERVERS=${DORIS_FE_SERVERS}
-      - FE_ADDR=fe1:9030
-      - be_addr=${DORIS_BE1_IP}:9050
-      - FE_ADDR=fe1:9030
-      - FE_ADDR=fe1:9030
       - FE_ID=1
     networks:
       doris_net:
         ipv4_address: ${DORIS_FE1_IP}
-    deploy:
-      resources:
-        limits:
-          cpus: '${DORIS_FE_CPUS}'
-          memory: ${DORIS_FE_MEMORY}
-        reservations:
-          cpus: '1'
-          memory: 1G
-    healthcheck:
-      test: ["CMD", "mysql", "-h", "127.0.0.1", "-P", "9030", "-u", "root", "-e", "SELECT 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 60s
-    restart: unless-stopped
-    privileged: true
 
   fe2:
-    image: zlsmshoqvwt6q1.xuanyuan.run/apache/doris:fe-${DORIS_VERSION}
+    <<: *fe-common
     container_name: doris_fe2
     hostname: fe2
     ports:
@@ -55,29 +73,13 @@ services:
     environment:
       - FE_SERVERS=${DORIS_FE_SERVERS}
       - FE_ID=2
-      - helper_nodes=172.20.0.11:9010
+      - helper_nodes=${DORIS_FE1_IP}:9010
     networks:
       doris_net:
         ipv4_address: ${DORIS_FE2_IP}
-    deploy:
-      resources:
-        limits:
-          cpus: '${DORIS_FE_CPUS}'
-          memory: ${DORIS_FE_MEMORY}
-        reservations:
-          cpus: '1'
-          memory: 1G
-    healthcheck:
-      test: ["CMD", "mysql", "-h", "127.0.0.1", "-P", "9030", "-u", "root", "-e", "SELECT 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 60s
-    restart: unless-stopped
-    privileged: true
 
   fe3:
-    image: zlsmshoqvwt6q1.xuanyuan.run/apache/doris:fe-${DORIS_VERSION}
+    <<: *fe-common
     container_name: doris_fe3
     hostname: fe3
     ports:
@@ -91,29 +93,13 @@ services:
     environment:
       - FE_SERVERS=${DORIS_FE_SERVERS}
       - FE_ID=3
-      - helper_nodes=172.20.0.11:9010
+      - helper_nodes=${DORIS_FE1_IP}:9010
     networks:
       doris_net:
         ipv4_address: ${DORIS_FE3_IP}
-    deploy:
-      resources:
-        limits:
-          cpus: '${DORIS_FE_CPUS}'
-          memory: ${DORIS_FE_MEMORY}
-        reservations:
-          cpus: '1'
-          memory: 1G
-    healthcheck:
-      test: ["CMD", "mysql", "-h", "127.0.0.1", "-P", "9030", "-u", "root", "-e", "SELECT 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 60s
-    restart: unless-stopped
-    privileged: true
 
   be1:
-    image: zlsmshoqvwt6q1.xuanyuan.run/apache/doris:be-${DORIS_VERSION}
+    <<: *be-common
     container_name: doris_be1
     hostname: be1
     ports:
@@ -130,25 +116,9 @@ services:
     networks:
       doris_net:
         ipv4_address: ${DORIS_BE1_IP}
-    deploy:
-      resources:
-        limits:
-          cpus: '${DORIS_BE_CPUS}'
-          memory: ${DORIS_BE_MEMORY}
-        reservations:
-          cpus: '2'
-          memory: 2G
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8040/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 60s
-    restart: unless-stopped
-    privileged: true
 
   be2:
-    image: zlsmshoqvwt6q1.xuanyuan.run/apache/doris:be-${DORIS_VERSION}
+    <<: *be-common
     container_name: doris_be2
     hostname: be2
     ports:
@@ -165,25 +135,9 @@ services:
     networks:
       doris_net:
         ipv4_address: ${DORIS_BE2_IP}
-    deploy:
-      resources:
-        limits:
-          cpus: '${DORIS_BE_CPUS}'
-          memory: ${DORIS_BE_MEMORY}
-        reservations:
-          cpus: '2'
-          memory: 2G
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8040/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 60s
-    restart: unless-stopped
-    privileged: true
 
   be3:
-    image: zlsmshoqvwt6q1.xuanyuan.run/apache/doris:be-${DORIS_VERSION}
+    <<: *be-common
     container_name: doris_be3
     hostname: be3
     ports:
@@ -200,22 +154,6 @@ services:
     networks:
       doris_net:
         ipv4_address: ${DORIS_BE3_IP}
-    deploy:
-      resources:
-        limits:
-          cpus: '${DORIS_BE_CPUS}'
-          memory: ${DORIS_BE_MEMORY}
-        reservations:
-          cpus: '2'
-          memory: 2G
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8040/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 60s
-    restart: unless-stopped
-    privileged: true
 
 networks:
   doris_net:
