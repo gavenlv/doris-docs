@@ -1,0 +1,35 @@
+# 1FE+2BE Scalable Configuration
+# Minimal resource usage for local testing
+
+access_key = "your-access-key-id"
+secret_key = "your-access-key-secret"
+
+region      = "cn-hangzhou"
+zone        = "cn-hangzhou-i"
+
+cluster_name = "doris"
+environment  = "dev"
+
+vpc_cidr     = "172.16.0.0/16"
+vswitch_cidr  = "172.16.0.0/24"
+
+fe_count = 1
+be_count = 2
+
+fe_instance_type = "ecs.g6.large"
+be_instance_type = "ecs.g6.2xlarge"
+
+fe_disk_size = 50
+be_disk_size = 100
+
+fe_disk_category = "cloud_essd"
+be_disk_category = "cloud_essd"
+
+image_id = "ubuntu_22_04_x64_20G_alibase_20231225.vhd"
+
+internet_bandwidth = 5
+
+fe_spot_strategy = "SpotWithPriceLimit"
+be_spot_strategy = "SpotWithPriceLimit"
+
+fe_servers = "fe1:172.16.0.11:9010"

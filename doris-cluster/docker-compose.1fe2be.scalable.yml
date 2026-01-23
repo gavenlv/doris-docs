@@ -1,0 +1,104 @@
+version: '3.8'
+
+x-fe-common: &fe-common
+  image: ${DORIS_REGISTRY}/apache/doris:fe-${DORIS_VERSION}
+  deploy:
+    resources:
+      limits:
+        cpus: '${DORIS_FE_CPUS}'
+        memory: ${DORIS_FE_MEMORY}
+      reservations:
+        cpus: '${DORIS_FE_RESERVATION_CPUS}'
+        memory: ${DORIS_FE_RESERVATION_MEMORY}
+  healthcheck:
+    test: ["CMD", "mysql", "-h", "127.0.0.1", "-P", "9030", "-u", "root", "-e", "SELECT 1"]
+    interval: ${DORIS_HEALTHCHECK_INTERVAL}
+    timeout: ${DORIS_HEALTHCHECK_TIMEOUT}
+    retries: ${DORIS_HEALTHCHECK_RETRIES}
+    start_period: ${DORIS_HEALTHCHECK_START_PERIOD}
+  restart: unless-stopped
+  privileged: true
+
+x-be-common: &be-common
+  image: ${DORIS_REGISTRY}/apache/doris:be-${DORIS_VERSION}
+  deploy:
+    resources:
+      limits:
+        cpus: '${DORIS_BE_CPUS}'
+        memory: ${DORIS_BE_MEMORY}
+      reservations:
+        cpus: '${DORIS_BE_RESERVATION_CPUS}'
+        memory: ${DORIS_BE_RESERVATION_MEMORY}
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://127.0.0.1:8040/api/health"]
+    interval: ${DORIS_HEALTHCHECK_INTERVAL}
+    timeout: ${DORIS_HEALTHCHECK_TIMEOUT}
+    retries: ${DORIS_HEALTHCHECK_RETRIES}
+    start_period: ${DORIS_HEALTHCHECK_START_PERIOD}
+  restart: unless-stopped
+  privileged: true
+
+services:
+  fe1:
+    <<: *fe-common
+    container_name: doris_fe1
+    hostname: fe1
+    ports:
+      - "9030:9030"
+      - "8030:8030"
+      - "9010:9010"
+    volumes:
+      - ./fe/fe1/conf:/opt/doris/fe/conf
+      - ./fe/fe1/data:/opt/doris/fe/doris-meta
+      - ./fe/fe1/log:/opt/doris/fe/log
+    environment:
+      - FE_SERVERS=${DORIS_FE_SERVERS}
+      - FE_ID=1
+    networks:
+      doris_net:
+        ipv4_address: ${DORIS_FE1_IP}
+
+  be1:
+    <<: *be-common
+    container_name: doris_be1
+    hostname: be1
+    ports:
+      - "9060:9060"
+      - "8040:8040"
+      - "9050:9050"
+    volumes:
+      - ./be/be1/conf:/opt/doris/be/conf
+      - ./be/be1/data:/opt/doris/be/storage
+      - ./be/be1/log:/opt/doris/be/log
+    environment:
+      - FE_SERVERS=${DORIS_FE_SERVERS}
+      - BE_ADDR=${DORIS_BE1_IP}:9050
+    networks:
+      doris_net:
+        ipv4_address: ${DORIS_BE1_IP}
+
+  be2:
+    <<: *be-common
+    container_name: doris_be2
+    hostname: be2
+    ports:
+      - "9061:9060"
+      - "8041:8040"
+      - "9051:9050"
+    volumes:
+      - ./be/be2/conf:/opt/doris/be/conf
+      - ./be/be2/data:/opt/doris/be/storage
+      - ./be/be2/log:/opt/doris/be/log
+    environment:
+      - FE_SERVERS=${DORIS_FE_SERVERS}
+      - BE_ADDR=${DORIS_BE2_IP}:9050
+    networks:
+      doris_net:
+        ipv4_address: ${DORIS_BE2_IP}
+
+networks:
+  doris_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${DORIS_NETWORK_SUBNET}

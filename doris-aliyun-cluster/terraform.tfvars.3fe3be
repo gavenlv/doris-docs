@@ -1,0 +1,35 @@
+# 3FE+3BE Production Configuration
+# High availability production setup
+
+access_key = "your-access-key-id"
+secret_key = "your-access-key-secret"
+
+region      = "cn-hangzhou"
+zone        = "cn-hangzhou-i"
+
+cluster_name = "doris"
+environment  = "prod"
+
+vpc_cidr     = "172.16.0.0/16"
+vswitch_cidr  = "172.16.0.0/24"
+
+fe_count = 3
+be_count = 3
+
+fe_instance_type = "ecs.g6.2xlarge"
+be_instance_type = "ecs.g6.4xlarge"
+
+fe_disk_size = 100
+be_disk_size = 200
+
+fe_disk_category = "cloud_essd"
+be_disk_category = "cloud_essd"
+
+image_id = "ubuntu_22_04_x64_20G_alibase_20231225.vhd"
+
+internet_bandwidth = 10
+
+fe_spot_strategy = "NoSpot"
+be_spot_strategy = "NoSpot"
+
+fe_servers = "fe1:172.16.0.11:9010,fe2:172.16.0.12:9011,fe3:172.16.0.13:9012"

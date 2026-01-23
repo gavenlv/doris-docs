@@ -1,0 +1,66 @@
+# Copy this file and rename to terraform.tfvars
+# Update the values below with your own settings
+
+# Required: GCP Project ID
+project_id = "your-project-id"
+
+# Required: Path to your SSH public key
+ssh_public_key_path = "~/.ssh/id_rsa.pub"
+
+# Optional: GCP Region
+region = "us-central1"
+
+# Optional: GCP Zone
+zone = "us-central1-a"
+
+# Optional: Cluster name
+cluster_name = "doris"
+
+# Optional: Environment name
+environment = "dev"
+
+# Optional: Subnet CIDR
+subnet_cidr = "10.0.0.0/16"
+
+# Optional: Allowed source IP ranges (use specific IPs for security)
+allowed_source_ranges = ["0.0.0.0/0"]
+
+# Optional: Number of FE instances (1-3)
+fe_count = 1
+
+# Optional: Number of BE instances (minimum 2)
+be_count = 2
+
+# Optional: FE machine type
+fe_machine_type = "e2-medium"
+
+# Optional: BE machine type
+be_machine_type = "e2-standard-2"
+
+# Optional: FE boot disk size in GB
+fe_disk_size = 50
+
+# Optional: BE boot disk size in GB
+be_disk_size = 100
+
+# Optional: FE disk type (pd-standard, pd-balanced, pd-ssd)
+fe_disk_type = "pd-balanced"
+
+# Optional: BE disk type (pd-standard, pd-balanced, pd-ssd)
+be_disk_type = "pd-ssd"
+
+# Optional: Source image family
+image_family = "ubuntu-2204-lts"
+
+# Optional: SSH username
+ssh_user = "ubuntu"
+
+# Optional: Use preemptible instances for FE (true = cheaper, false = more reliable)
+fe_preemptible = true
+
+# Optional: Use preemptible instances for BE (true = cheaper, false = more reliable)
+be_preemptible = true
+
+# Optional: FE servers configuration (auto-generated based on fe_count)
+# Format: fe1:10.0.0.11:9010,fe2:10.0.0.12:9011,fe3:10.0.0.13:9012
+fe_servers = "fe1:10.0.0.11:9010"

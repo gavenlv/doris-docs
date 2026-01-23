@@ -2,7 +2,13 @@
 
 ## 概述
 
-本部署方案使用 Docker Compose 部署一个生产级别的 Doris 集群，包含 3 个 FE 节点和 3 个 BE 节点。
+本部署方案提供多种 Doris 集群配置，可根据资源需求选择合适的部署方案：
+
+| 配置方案 | FE 节点 | BE 节点 | 资源占用 | 适用场景 |
+|---------|---------|---------|---------|---------|
+| 3FE+3BE | 3 | 3 | 9GB 内存, 9 CPU | 生产环境，高可用 |
+| 2FE+2BE | 2 | 2 | 6GB 内存, 6 CPU | 测试环境，资源适中 |
+| 1FE+2BE (可扩展) | 1 | 2+ | 4GB+ 内存, 5+ CPU | 本地测试，灵活扩展 |
 
 ## 集群架构
 
@@ -113,6 +119,29 @@ graph TB
 - 至少 50GB 可用磁盘空间
 
 ## 快速开始
+
+### 选择部署方案
+
+根据您的需求选择合适的部署方案：
+
+#### 方案 1: 3FE+3BE (生产环境)
+- **配置**: 3 个 FE + 3 个 BE
+- **资源**: 9GB 内存, 9 CPU
+- **网络**: 172.20.0.0/16
+- **启动**: `start-cluster.bat`
+
+#### 方案 2: 2FE+2BE (测试环境)
+- **配置**: 2 个 FE + 2 个 BE
+- **资源**: 6GB 内存, 6 CPU
+- **网络**: 172.21.0.0/16
+- **启动**: `start-cluster-2fe2be.bat`
+
+#### 方案 3: 1FE+2BE (本地测试，可扩展)
+- **配置**: 1 个 FE + 2 个 BE（可动态添加更多 BE）
+- **资源**: 4GB+ 内存, 5+ CPU
+- **网络**: 172.23.0.0/16
+- **启动**: `start-cluster-1fe2be-scalable.bat`
+- **扩展**: 使用 `add-be.bat` 添加新 BE 节点
 
 ### 1. 配置资源（可选）
 
@@ -286,13 +315,38 @@ docker exec doris_fe1 mysql -h 127.0.0.1 -P 9030 -u root -e "SHOW BACKENDS;"
 
 ### 扩容 BE 节点
 
-1. 修改 docker-compose.yml 添加新的 BE 节点
+#### 对于 3FE+3BE 和 2FE+2BE 集群
+
+1. 修改对应的 docker-compose.yml 添加新的 BE 节点
 2. 启动新节点
 3. 在 FE 中添加新节点
 
 ```bash
 docker exec doris_fe1 mysql -h 127.0.0.1 -P 9030 -u root -e "ALTER SYSTEM ADD BACKEND '新BE_IP:9050';"
 ```
+
+#### 对于 1FE+2BE 可扩展集群
+
+使用提供的 `add-be.bat` 脚本动态添加 BE 节点：
+
+```bash
+# 添加第3个 BE 节点
+add-be.bat 3 172.23.0.23
+
+# 添加第4个 BE 节点
+add-be.bat 4 172.23.0.24
+```
+
+脚本会自动：
+1. 在 docker-compose.1fe2be.scalable.yml 中添加新 BE 服务
+2. 在 .env.1fe2be.scalable 中添加新 BE IP
+3. 提示如何启动集群和添加节点到 Doris
+
+**步骤**：
+1. 运行 `add-be.bat <be_number> <be_ip>`
+2. 根据提示编辑配置文件
+3. 运行 `start-cluster-1fe2be-scalable.bat` 启动集群
+4. 执行提示中的 SQL 命令将新 BE 添加到 Doris
 
 ### 备份与恢复
 

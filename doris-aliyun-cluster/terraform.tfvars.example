@@ -1,0 +1,69 @@
+# Copy this file and rename to terraform.tfvars
+# Update the values below with your own settings
+
+# Required: Aliyun AccessKey ID
+access_key = "your-access-key-id"
+
+# Required: Aliyun AccessKey Secret
+secret_key = "your-access-key-secret"
+
+# Optional: Aliyun Region
+region = "cn-hangzhou"
+
+# Optional: Aliyun Zone
+zone = "cn-hangzhou-i"
+
+# Optional: Cluster name
+cluster_name = "doris"
+
+# Optional: Environment name
+environment = "dev"
+
+# Optional: VPC CIDR
+vpc_cidr = "172.16.0.0/16"
+
+# Optional: VSwitch CIDR
+vswitch_cidr = "172.16.0.0/24"
+
+# Optional: Number of FE instances (1-3)
+fe_count = 1
+
+# Optional: Number of BE instances (minimum 2)
+be_count = 2
+
+# Optional: FE instance type
+fe_instance_type = "ecs.g6.large"
+
+# Optional: BE instance type
+be_instance_type = "ecs.g6.2xlarge"
+
+# Optional: FE boot disk size in GB
+fe_disk_size = 50
+
+# Optional: BE boot disk size in GB
+be_disk_size = 100
+
+# Optional: FE disk category (cloud_essd, cloud_ssd, cloud_efficiency)
+fe_disk_category = "cloud_essd"
+
+# Optional: BE disk category (cloud_essd, cloud_ssd, cloud_efficiency)
+be_disk_category = "cloud_essd"
+
+# Optional: ECS image ID
+image_id = "ubuntu_22_04_x64_20G_alibase_20231225.vhd"
+
+# Optional: Internet bandwidth in Mbps
+internet_bandwidth = 5
+
+# Optional: SSH username
+ssh_user = "root"
+
+# Optional: FE spot instance strategy (SpotWithPriceLimit, SpotAsPriceGo, NoSpot)
+fe_spot_strategy = "SpotWithPriceLimit"
+
+# Optional: BE spot instance strategy (SpotWithPriceLimit, SpotAsPriceGo, NoSpot)
+be_spot_strategy = "SpotWithPriceLimit"
+
+# Optional: FE servers configuration (auto-generated based on fe_count)
+# Format: fe1:172.16.0.11:9010,fe2:172.16.0.12:9011,fe3:172.16.0.13:9012
+fe_servers = "fe1:172.16.0.11:9010"
