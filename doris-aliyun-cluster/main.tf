@@ -114,9 +114,19 @@ resource "alicloud_instance" "be_instances" {
   internet_max_bandwidth_out = var.internet_bandwidth
 
   user_data = templatefile("${path.module}/user-data-be.sh", {
-    cluster_name = var.cluster_name
-    fe_servers  = var.fe_servers
-    be_id       = "${count.index + 1}"
+    cluster_name        = var.cluster_name
+    fe_servers         = var.fe_servers
+    be_id              = "${count.index + 1}"
+    enable_tiered_storage = var.enable_tiered_storage
+    oss_hot_bucket    = var.oss_hot_bucket_name != "" ? "${var.oss_bucket_prefix}-hot" : ""
+    oss_warm_bucket   = var.oss_warm_bucket_name != "" ? "${var.oss_bucket_prefix}-warm" : ""
+    oss_cold_bucket   = var.oss_cold_bucket_name != "" ? "${var.oss_bucket_prefix}-cold" : ""
+    hot_storage_size   = var.hot_storage_size
+    warm_storage_size  = var.warm_storage_size
+    cold_storage_size  = var.cold_storage_size
+    oss_access_key_id  = var.oss_access_key_id
+    oss_access_key_secret = var.oss_access_key_secret
+    oss_endpoint       = var.oss_endpoint
   })
 
   tags = {
@@ -125,6 +135,84 @@ resource "alicloud_instance" "be_instances" {
   }
 
   spot_strategy = var.be_spot_strategy
+}
+
+resource "alicloud_oss_bucket" "hot_bucket" {
+  count  = var.enable_tiered_storage ? 1 : 0
+  bucket = var.oss_hot_bucket_name != "" ? var.oss_hot_bucket_name : "${var.oss_bucket_prefix}-hot"
+  acl    = "private"
+  storage_class = "IA"
+}
+
+resource "alicloud_oss_bucket" "warm_bucket" {
+  count  = var.enable_tiered_storage ? 1 : 0
+  bucket = var.oss_warm_bucket_name != "" ? var.oss_warm_bucket_name : "${var.oss_bucket_prefix}-warm"
+  acl    = "private"
+  storage_class = "Standard"
+}
+
+resource "alicloud_oss_bucket" "cold_bucket" {
+  count  = var.enable_tiered_storage ? 1 : 0
+  bucket = var.oss_cold_bucket_name != "" ? var.oss_cold_bucket_name : "${var.oss_bucket_prefix}-cold"
+  acl    = "private"
+  storage_class = "Archive"
+}
+
+resource "alicloud_oss_bucket_lifecycle_configuration" "hot_lifecycle" {
+  count       = var.enable_tiered_storage ? 1 : 0
+  bucket      = alicloud_oss_bucket.hot_bucket[0].id
+  rule {
+    id      = "rule1"
+    enabled = true
+    expiration {
+      days = 30
+    }
+    abort_multipart_upload {
+      days_after_initiation = 7
+    }
+    transition {
+      days          = 7
+      storage_class = "Standard"
+    }
+    transition {
+      days          = 30
+      storage_class = "Archive"
+    }
+  }
+}
+
+resource "alicloud_oss_bucket_lifecycle_configuration" "warm_lifecycle" {
+  count       = var.enable_tiered_storage ? 1 : 0
+  bucket      = alicloud_oss_bucket.warm_bucket[0].id
+  rule {
+    id      = "rule1"
+    enabled = true
+    expiration {
+      days = 90
+    }
+    abort_multipart_upload {
+      days_after_initiation = 7
+    }
+    transition {
+      days          = 60
+      storage_class = "Archive"
+    }
+  }
+}
+
+resource "alicloud_oss_bucket_lifecycle_configuration" "cold_lifecycle" {
+  count       = var.enable_tiered_storage ? 1 : 0
+  bucket      = alicloud_oss_bucket.cold_bucket[0].id
+  rule {
+    id      = "rule1"
+    enabled = true
+    expiration {
+      days = 365
+    }
+    abort_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
 }
 
 resource "alicloud_eip" "fe_eips" {

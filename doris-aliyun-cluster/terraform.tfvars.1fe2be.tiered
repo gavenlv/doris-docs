@@ -1,5 +1,5 @@
 # Aliyun Doris Cluster - Native Deployment (No Docker)
-# 3FE + 3BE Configuration (Production)
+# 1FE + 2BE Configuration with Tiered Storage
 
 # Aliyun Credentials
 access_key = "your-access-key-id"
@@ -11,43 +11,46 @@ zone = "cn-hangzhou-i"
 
 # Cluster Configuration
 cluster_name = "doris"
-environment = "prod"
+environment = "dev"
 
 # Network Configuration
 vpc_cidr = "172.16.0.0/16"
 vswitch_cidr = "172.16.0.0/24"
 
 # FE Configuration
-fe_count = 3
-fe_instance_type = "ecs.g6.2xlarge"
-fe_disk_size = 100
+fe_count = 1
+fe_instance_type = "ecs.g6.large"
+fe_disk_size = 50
 fe_disk_category = "cloud_essd"
-fe_spot_strategy = "SpotAsPriceGo"
+fe_spot_strategy = "SpotWithPriceLimit"
 
 # BE Configuration
-be_count = 3
-be_instance_type = "ecs.g6.4xlarge"
-be_disk_size = 200
+be_count = 2
+be_instance_type = "ecs.g6.2xlarge"
+be_disk_size = 100
 be_disk_category = "cloud_essd"
-be_spot_strategy = "SpotAsPriceGo"
+be_spot_strategy = "SpotWithPriceLimit"
 
 # FE Servers Configuration
-fe_servers = "fe1:172.16.0.11:9010,fe2:172.16.0.12:9010,fe3:172.16.0.13:9010"
+fe_servers = "fe1:172.16.0.11:9010"
 
 # Image Configuration
 image_id = "ubuntu_22_04_x64_20G_alibase_20231225.vhd"
 
 # Network Configuration
-internet_bandwidth = 10
+internet_bandwidth = 5
 
-# Tiered Storage Configuration (Optional)
-enable_tiered_storage = false
-hot_storage_size = 200
-warm_storage_size = 1000
-cold_storage_size = 2000
+# Deployment Mode
+use_docker = false
+
+# Tiered Storage Configuration (Enabled)
+enable_tiered_storage = true
+hot_storage_size = 100
+warm_storage_size = 500
+cold_storage_size = 1000
 oss_bucket_prefix = "doris"
 
 # OSS Credentials (Required for tiered storage)
-oss_access_key_id = ""
-oss_access_key_secret = ""
+oss_access_key_id = "your-oss-access-key-id"
+oss_access_key_secret = "your-oss-access-key-secret"
 oss_endpoint = "oss-cn-hangzhou.aliyuncs.com"

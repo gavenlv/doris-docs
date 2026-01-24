@@ -1,0 +1,29 @@
+{
+  "builder": {
+    "gc": {
+      "defaultKeepStorage": "20GB",
+      "enabled": true
+    }
+  },
+  "experimental": false,
+  "insecure-registries": [
+    "1updiiz3grrqk9jb6n.xuanyuan.run",
+    "1updiiz3grrqk9jb6n-ghcr.xuanyuan.run",
+    "1updiiz3grrqk9jb6n-gcr.xuanyuan.run",
+    "1updiiz3grrqk9jb6n-quay.xuanyuan.run",
+    "1updiiz3grrqk9jb6n-nvcr.xuanyuan.run",
+    "1updiiz3grrqk9jb6n-k8s.xuanyuan.run",
+    "1updiiz3grrqk9jb6n-mcr.xuanyuan.run",
+    "1updiiz3grrqk9jb6n-ghcr.xuanyuan.run"
+  ],
+  "registry-mirrors": [
+    "https://1updiiz3grrqk9jb6n.xuanyuan.run",
+    "https://1updiiz3grrqk9jb6n-ghcr.xuanyuan.run",
+    "https://1updiiz3grrqk9jb6n-gcr.xuanyuan.run",
+    "https://1updiiz3grrqk9jb6n-quay.xuanyuan.run",
+    "https://1updiiz3grrqk9jb6n-nvcr.xuanyuan.run",
+    "https://1updiiz3grrqk9jb6n-k8s.xuanyuan.run",
+    "https://1updiiz3grrqk9jb6n-mcr.xuanyuan.run",
+    "https://1updiiz3grrqk9jb6n-ghcr.xuanyuan.run"
+  ]
+}

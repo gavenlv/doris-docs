@@ -5,7 +5,7 @@ CLUSTER_NAME="${cluster_name}"
 FE_SERVERS="${fe_servers}"
 FE_ID="${fe_id}"
 
-echo "Starting Doris FE instance setup..."
+echo "Starting Doris FE instance setup (Native Deployment)..."
 echo "Cluster: ${CLUSTER_NAME}"
 echo "FE ID: ${FE_ID}"
 echo "FE Servers: ${FE_SERVERS}"
@@ -13,30 +13,39 @@ echo "FE Servers: ${FE_SERVERS}"
 # Update system
 apt-get update && apt-get upgrade -y
 
-# Install Docker
+# Install dependencies
 apt-get install -y \
-    ca-certificates \
+    openjdk-11-jdk \
+    wget \
     curl \
-    gnupg \
-    lsb-release
+    vim \
+    net-tools \
+    lsof
 
-mkdir -p /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-  $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+# Set Java environment
+cat >> /etc/profile.d/java.sh <<EOF
+export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+export PATH=\$JAVA_HOME/bin:\$PATH
+EOF
+source /etc/profile.d/java.sh
 
-apt-get update
-apt-get install -y docker-ce docker-ce-cli containerd.io
+# Download Doris FE
+DORIS_VERSION="4.0.2"
+DORIS_MIRROR="https://archive.apache.org/dist/doris"
+FE_PACKAGE="apache-doris-fe-${DORIS_VERSION}-bin-x86_64.tar.gz"
 
-# Install Docker Compose
-curl -SL https://github.com/docker/compose/releases/download/v2.20.0/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose
-chmod +x /usr/local/bin/docker-compose
+echo "Downloading Doris FE ${DORIS_VERSION}..."
+wget -q ${DORIS_MIRROR}/${DORIS_VERSION}/${FE_PACKAGE} -O /tmp/${FE_PACKAGE}
+
+# Extract and install
+mkdir -p /opt/doris
+tar -xzf /tmp/${FE_PACKAGE} -C /opt/doris
+mv /opt/doris/apache-doris-fe-${DORIS_VERSION}-bin-x86_64 /opt/doris/fe
 
 # Create directories
-mkdir -p /opt/doris/fe/conf
 mkdir -p /opt/doris/fe/doris-meta
 mkdir -p /opt/doris/fe/log
+mkdir -p /opt/doris/fe/conf
 
 # Create FE configuration
 cat > /opt/doris/fe/conf/fe.conf <<EOF
@@ -88,20 +97,48 @@ enable_token_check = true
 enable_deploy_manager = true
 EOF
 
-# Start FE container
-docker run -d \
-  --name doris_fe${FE_ID} \
-  --network host \
-  --restart unless-stopped \
-  -v /opt/doris/fe/conf:/opt/doris/fe/conf \
-  -v /opt/doris/fe/doris-meta:/opt/doris/fe/doris-meta \
-  -v /opt/doris/fe/log:/opt/doris/fe/log \
-  -e FE_SERVERS="${FE_SERVERS}" \
-  -e FE_ID="${FE_ID}" \
-  zlsmshoqvwt6q1.xuanyuan.run/apache/doris:fe-4.0.2
+# Create systemd service
+cat > /etc/systemd/system/doris-fe.service <<EOF
+[Unit]
+Description=Doris Frontend Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/doris/fe
+Environment="JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64"
+ExecStart=/opt/doris/fe/bin/start_fe.sh --daemon
+ExecStop=/opt/doris/fe/bin/stop_fe.sh
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Set permissions
+chmod +x /opt/doris/fe/bin/*.sh
+chown -R root:root /opt/doris/fe
+
+# Start FE based on role
+if [ "${FE_ID}" = "1" ]; then
+  echo "Starting FE as MASTER..."
+  /opt/doris/fe/bin/start_fe.sh --daemon
+else
+  echo "Starting FE as FOLLOWER..."
+  /opt/doris/fe/bin/start_fe.sh --helper ${FE_SERVERS} --daemon
+fi
+
+# Enable systemd service
+systemctl daemon-reload
+systemctl enable doris-fe
 
 echo "Doris FE${FE_ID} setup completed!"
 echo "Waiting for FE to start..."
 sleep 60
 
 echo "FE${FE_ID} is ready!"
+echo "Service status:"
+systemctl status doris-fe --no-pager

@@ -4,39 +4,126 @@ set -e
 CLUSTER_NAME="${cluster_name}"
 FE_SERVERS="${fe_servers}"
 BE_ID="${be_id}"
+ENABLE_TIERED_STORAGE="${enable_tiered_storage:-false}"
+OSS_HOT_BUCKET="${oss_hot_bucket:-}"
+OSS_WARM_BUCKET="${oss_warm_bucket:-}"
+OSS_COLD_BUCKET="${oss_cold_bucket:-}"
+HOT_STORAGE_SIZE="${hot_storage_size:-100}"
+WARM_STORAGE_SIZE="${warm_storage_size:-500}"
+COLD_STORAGE_SIZE="${cold_storage_size:-1000}"
+OSS_ACCESS_KEY_ID="${oss_access_key_id:-}"
+OSS_ACCESS_KEY_SECRET="${oss_access_key_secret:-}"
+OSS_ENDPOINT="${oss_endpoint:-}"
 
-echo "Starting Doris BE instance setup..."
+echo "Starting Doris BE instance setup (Native Deployment)..."
 echo "Cluster: ${CLUSTER_NAME}"
 echo "BE ID: ${BE_ID}"
 echo "FE Servers: ${FE_SERVERS}"
+echo "Tiered Storage Enabled: ${ENABLE_TIERED_STORAGE}"
 
 # Update system
 apt-get update && apt-get upgrade -y
 
-# Install Docker
+# Install dependencies
 apt-get install -y \
-    ca-certificates \
+    openjdk-11-jdk \
+    wget \
     curl \
-    gnupg \
-    lsb-release
+    vim \
+    net-tools \
+    lsof \
+    uuid-runtime \
+    libaio1
 
-mkdir -p /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-  $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+# Set Java environment
+cat >> /etc/profile.d/java.sh <<EOF
+export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+export PATH=\$JAVA_HOME/bin:\$PATH
+EOF
+source /etc/profile.d/java.sh
 
-apt-get update
-apt-get install -y docker-ce docker-ce-cli containerd.io
+# Download Doris BE
+DORIS_VERSION="4.0.2"
+DORIS_MIRROR="https://archive.apache.org/dist/doris"
+BE_PACKAGE="apache-doris-be-${DORIS_VERSION}-bin-x86_64.tar.gz"
 
-# Install Docker Compose
-curl -SL https://github.com/docker/compose/releases/download/v2.20.0/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose
-chmod +x /usr/local/bin/docker-compose
+echo "Downloading Doris BE ${DORIS_VERSION}..."
+wget -q ${DORIS_MIRROR}/${DORIS_VERSION}/${BE_PACKAGE} -O /tmp/${BE_PACKAGE}
+
+# Extract and install
+mkdir -p /opt/doris
+tar -xzf /tmp/${BE_PACKAGE} -C /opt/doris
+mv /opt/doris/apache-doris-be-${DORIS_VERSION}-bin-x86_64 /opt/doris/be
 
 # Create directories
-mkdir -p /opt/doris/be/conf
 mkdir -p /opt/doris/be/storage
 mkdir -p /opt/doris/be/log
+mkdir -p /opt/doris/be/conf
+
+# Configure tiered storage
+if [ "$ENABLE_TIERED_STORAGE" = "true" ]; then
+  echo "Configuring tiered storage..."
+  
+  # Install rclone for OSS mounting
+  apt-get install -y rclone
+  
+  # Create mount points
+  mkdir -p /mnt/oss-hot
+  mkdir -p /mnt/oss-warm
+  mkdir -p /mnt/oss-cold
+  
+  # Configure rclone for OSS
+  cat > /root/.config/rclone/rclone.conf <<EOF
+[doris-hot]
+type = aliyun
+access_key_id = ${OSS_ACCESS_KEY_ID}
+secret_access_key = ${OSS_ACCESS_KEY_SECRET}
+endpoint = ${OSS_ENDPOINT}
+acl = private
+
+[doris-warm]
+type = aliyun
+access_key_id = ${OSS_ACCESS_KEY_ID}
+secret_access_key = ${OSS_ACCESS_KEY_SECRET}
+endpoint = ${OSS_ENDPOINT}
+acl = private
+
+[doris-cold]
+type = aliyun
+access_key_id = ${OSS_ACCESS_KEY_ID}
+secret_access_key = ${OSS_ACCESS_KEY_SECRET}
+endpoint = ${OSS_ENDPOINT}
+acl = private
+EOF
+  
+  # Mount OSS buckets using rclone mount
+  cat > /etc/systemd/system/doris-oss-mount.service <<EOF
+[Unit]
+Description=Doris OSS Mount Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/bin/bash -c 'rclone mount doris-hot:${OSS_HOT_BUCKET} /mnt/oss-hot --allow-other --allow-non-empty --vfs-cache-mode full --daemon-timeout 10m & rclone mount doris-warm:${OSS_WARM_BUCKET} /mnt/oss-warm --allow-other --allow-non-empty --vfs-cache-mode full --daemon-timeout 10m & rclone mount doris-cold:${OSS_COLD_BUCKET} /mnt/oss-cold --allow-other --allow-non-empty --vfs-cache-mode full --daemon-timeout 10m & wait'
+ExecStop=/bin/bash -c 'umount /mnt/oss-hot /mnt/oss-warm /mnt/oss-cold 2>/dev/null || true'
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  
+  systemctl daemon-reload
+  systemctl enable doris-oss-mount
+  systemctl start doris-oss-mount
+  
+  echo "Waiting for OSS mounts to be ready..."
+  sleep 10
+  
+  STORAGE_PATHS="/opt/doris/be/storage,/mnt/oss-hot,/mnt/oss-warm,/mnt/oss-cold"
+else
+  STORAGE_PATHS="/opt/doris/be/storage"
+fi
 
 # Create BE configuration
 cat > /opt/doris/be/conf/be.conf <<EOF
@@ -46,7 +133,7 @@ BACKEND_PORT = 9060
 BRPC_PORT = 8060
 priority_networks = 172.16.0.0/16
 
-storage_root_path = /opt/doris/be/storage
+storage_root_path = ${STORAGE_PATHS}
 
 JAVA_OPTS="-Xmx4g -Xms4g -Xmn2g -XX:+UseMembar -XX:SurvivorRatio=8 -XX:MaxTenuringThreshold=7 -XX:+PrintGCDateStamps -XX:+PrintGCDetails -XX:+UseConcMarkSweepGC -XX:+UseParNewGC -XX:+CMSClassUnloadingEnabled -XX:-CMSParallelRemarkEnabled -XX:CMSInitiatingOccupancyFraction=80 -XX:SoftRefLRUPolicyMSPerMB=0 -Xloggc:\$LOG_DIR/be.gc.log.\$DATE"
 
@@ -85,20 +172,66 @@ enable_token_check = true
 enable_deploy_manager = true
 EOF
 
-# Start BE container
-docker run -d \
-  --name doris_be${BE_ID} \
-  --network host \
-  --restart unless-stopped \
-  -v /opt/doris/be/conf:/opt/doris/be/conf \
-  -v /opt/doris/be/storage:/opt/doris/be/storage \
-  -v /opt/doris/be/log:/opt/doris/be/log \
-  -e FE_SERVERS="${FE_SERVERS}" \
-  -e BE_ADDR="172.16.0.2${BE_ID}:9050" \
-  zlsmshoqvwt6q1.xuanyuan.run/apache/doris:be-4.0.2
+# Configure tiered storage policies
+if [ "$ENABLE_TIERED_STORAGE" = "true" ]; then
+  cat >> /opt/doris/be/conf/be.conf <<EOF
+
+# Tiered Storage Configuration
+storage_flood_stage_usage_percent = 90
+storage_flood_stage_left_capacity_bytes = 10737418240
+EOF
+fi
+
+# Create systemd service
+cat > /etc/systemd/system/doris-be.service <<EOF
+[Unit]
+Description=Doris Backend Service
+After=network.target doris-oss-mount.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/doris/be
+Environment="JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64"
+ExecStart=/opt/doris/be/bin/start_be.sh --daemon
+ExecStop=/opt/doris/be/bin/stop_be.sh
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Set permissions
+chmod +x /opt/doris/be/bin/*.sh
+chown -R root:root /opt/doris/be
+
+# Start BE
+echo "Starting BE..."
+/opt/doris/be/bin/start_be.sh --daemon
+
+# Enable systemd service
+systemctl daemon-reload
+systemctl enable doris-be
 
 echo "Doris BE${BE_ID} setup completed!"
 echo "Waiting for BE to start..."
 sleep 30
 
 echo "BE${BE_ID} is ready!"
+echo "Service status:"
+systemctl status doris-be --no-pager
+
+if [ "$ENABLE_TIERED_STORAGE" = "true" ]; then
+  echo ""
+  echo "Tiered Storage Configuration:"
+  echo "  Hot Storage (SSD):  $OSS_HOT_BUCKET (${HOT_STORAGE_SIZE}GB)"
+  echo "  Warm Storage (OSS): $OSS_WARM_BUCKET (${WARM_STORAGE_SIZE}GB)"
+  echo "  Cold Storage (OSS): $OSS_COLD_BUCKET (${COLD_STORAGE_SIZE}GB)"
+  echo ""
+  echo "Storage Lifecycle Policies:"
+  echo "  Hot -> Warm: 7 days"
+  echo "  Warm -> Cold: 60 days"
+  echo "  Cold Expiration: 365 days"
+fi

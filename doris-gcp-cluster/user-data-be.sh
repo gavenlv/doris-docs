@@ -5,7 +5,7 @@ CLUSTER_NAME="${cluster_name}"
 FE_SERVERS="${fe_servers}"
 BE_ID="${be_id}"
 
-echo "Starting Doris BE instance setup..."
+echo "Starting Doris BE instance setup (Native Deployment)..."
 echo "Cluster: ${CLUSTER_NAME}"
 echo "BE ID: ${BE_ID}"
 echo "FE Servers: ${FE_SERVERS}"
@@ -13,30 +13,41 @@ echo "FE Servers: ${FE_SERVERS}"
 # Update system
 apt-get update && apt-get upgrade -y
 
-# Install Docker
+# Install dependencies
 apt-get install -y \
-    ca-certificates \
+    openjdk-11-jdk \
+    wget \
     curl \
-    gnupg \
-    lsb-release
+    vim \
+    net-tools \
+    lsof \
+    uuid-runtime \
+    libaio1
 
-mkdir -p /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-  $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+# Set Java environment
+cat >> /etc/profile.d/java.sh <<EOF
+export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+export PATH=\$JAVA_HOME/bin:\$PATH
+EOF
+source /etc/profile.d/java.sh
 
-apt-get update
-apt-get install -y docker-ce docker-ce-cli containerd.io
+# Download Doris BE
+DORIS_VERSION="4.0.2"
+DORIS_MIRROR="https://archive.apache.org/dist/doris"
+BE_PACKAGE="apache-doris-be-${DORIS_VERSION}-bin-x86_64.tar.gz"
 
-# Install Docker Compose
-curl -SL https://github.com/docker/compose/releases/download/v2.20.0/docker-compose-linux-x86_64 -o /usr/local/bin/docker-compose
-chmod +x /usr/local/bin/docker-compose
+echo "Downloading Doris BE ${DORIS_VERSION}..."
+wget -q ${DORIS_MIRROR}/${DORIS_VERSION}/${BE_PACKAGE} -O /tmp/${BE_PACKAGE}
+
+# Extract and install
+mkdir -p /opt/doris
+tar -xzf /tmp/${BE_PACKAGE} -C /opt/doris
+mv /opt/doris/apache-doris-be-${DORIS_VERSION}-bin-x86_64 /opt/doris/be
 
 # Create directories
-mkdir -p /opt/doris/be/conf
 mkdir -p /opt/doris/be/storage
 mkdir -p /opt/doris/be/log
+mkdir -p /opt/doris/be/conf
 
 # Create BE configuration
 cat > /opt/doris/be/conf/be.conf <<EOF
@@ -85,20 +96,43 @@ enable_token_check = true
 enable_deploy_manager = true
 EOF
 
-# Start BE container
-docker run -d \
-  --name doris_be${BE_ID} \
-  --network host \
-  --restart unless-stopped \
-  -v /opt/doris/be/conf:/opt/doris/be/conf \
-  -v /opt/doris/be/storage:/opt/doris/be/storage \
-  -v /opt/doris/be/log:/opt/doris/be/log \
-  -e FE_SERVERS="${FE_SERVERS}" \
-  -e BE_ADDR="10.0.0.2${BE_ID}:9050" \
-  zlsmshoqvwt6q1.xuanyuan.run/apache/doris:be-4.0.2
+# Create systemd service
+cat > /etc/systemd/system/doris-be.service <<EOF
+[Unit]
+Description=Doris Backend Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/doris/be
+Environment="JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64"
+ExecStart=/opt/doris/be/bin/start_be.sh --daemon
+ExecStop=/opt/doris/be/bin/stop_be.sh
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Set permissions
+chmod +x /opt/doris/be/bin/*.sh
+chown -R root:root /opt/doris/be
+
+# Start BE
+echo "Starting BE..."
+/opt/doris/be/bin/start_be.sh --daemon
+
+# Enable systemd service
+systemctl daemon-reload
+systemctl enable doris-be
 
 echo "Doris BE${BE_ID} setup completed!"
 echo "Waiting for BE to start..."
 sleep 30
 
 echo "BE${BE_ID} is ready!"
+echo "Service status:"
+systemctl status doris-be --no-pager

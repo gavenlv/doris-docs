@@ -131,3 +131,71 @@ variable "fe_servers" {
   type        = string
   default     = "fe1:172.16.0.11:9010"
 }
+
+variable "enable_tiered_storage" {
+  description = "Enable tiered storage (SSD hot, OSS warm, OSS cold)"
+  type        = bool
+  default     = false
+}
+
+variable "hot_storage_size" {
+  description = "Hot storage size in GB (SSD)"
+  type        = number
+  default     = 100
+}
+
+variable "warm_storage_size" {
+  description = "Warm storage size in GB (OSS Standard)"
+  type        = number
+  default     = 500
+}
+
+variable "cold_storage_size" {
+  description = "Cold storage size in GB (OSS Archive)"
+  type        = number
+  default     = 1000
+}
+
+variable "oss_bucket_prefix" {
+  description = "OSS bucket prefix"
+  type        = string
+  default     = "doris"
+}
+
+variable "oss_hot_bucket_name" {
+  description = "OSS hot bucket name (for SSD hot storage)"
+  type        = string
+  default     = ""
+}
+
+variable "oss_warm_bucket_name" {
+  description = "OSS warm bucket name (for warm storage)"
+  type        = string
+  default     = ""
+}
+
+variable "oss_cold_bucket_name" {
+  description = "OSS cold bucket name (for cold storage)"
+  type        = string
+  default     = ""
+}
+
+variable "oss_access_key_id" {
+  description = "OSS Access Key ID for tiered storage"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "oss_access_key_secret" {
+  description = "OSS Access Key Secret for tiered storage"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "oss_endpoint" {
+  description = "OSS endpoint (e.g., oss-cn-hangzhou.aliyuncs.com)"
+  type        = string
+  default     = "oss-cn-hangzhou.aliyuncs.com"
+}
