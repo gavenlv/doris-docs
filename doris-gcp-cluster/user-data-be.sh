@@ -2,13 +2,19 @@
 set -e
 
 CLUSTER_NAME="${cluster_name}"
+ENVIRONMENT="${environment}"
 FE_SERVERS="${fe_servers}"
 BE_ID="${be_id}"
+GCS_BUCKET="${gcs_bucket}"
+ENABLE_SEPARATION="${enable_separation}"
 
 echo "Starting Doris BE instance setup (Native Deployment)..."
 echo "Cluster: ${CLUSTER_NAME}"
+echo "Environment: ${ENVIRONMENT}"
 echo "BE ID: ${BE_ID}"
 echo "FE Servers: ${FE_SERVERS}"
+echo "GCS Bucket: ${GCS_BUCKET}"
+echo "Enable Compute-Storage Separation: ${ENABLE_SEPARATION}"
 
 # Update system
 apt-get update && apt-get upgrade -y
@@ -22,7 +28,8 @@ apt-get install -y \
     net-tools \
     lsof \
     uuid-runtime \
-    libaio1
+    libaio1 \
+    google-cloud-cli
 
 # Set Java environment
 cat >> /etc/profile.d/java.sh <<EOF
@@ -56,8 +63,6 @@ HEARTBEAT_SERVICE_PORT = 9050
 BACKEND_PORT = 9060
 BRPC_PORT = 8060
 priority_networks = 10.0.0.0/16
-
-storage_root_path = /opt/doris/be/storage
 
 JAVA_OPTS="-Xmx4g -Xms4g -Xmn2g -XX:+UseMembar -XX:SurvivorRatio=8 -XX:MaxTenuringThreshold=7 -XX:+PrintGCDateStamps -XX:+PrintGCDetails -XX:+UseConcMarkSweepGC -XX:+UseParNewGC -XX:+CMSClassUnloadingEnabled -XX:-CMSParallelRemarkEnabled -XX:CMSInitiatingOccupancyFraction=80 -XX:SoftRefLRUPolicyMSPerMB=0 -Xloggc:\$LOG_DIR/be.gc.log.\$DATE"
 
@@ -95,6 +100,21 @@ enable_token_check = true
 
 enable_deploy_manager = true
 EOF
+
+# Configure storage paths
+if [ "${ENABLE_SEPARATION}" = "true" ] && [ -n "${GCS_BUCKET}" ]; then
+  cat >> /opt/doris/be/conf/be.conf <<EOF
+# Compute-Storage Separation Configuration
+storage_root_path = /opt/doris/be/storage,${GCS_BUCKET}/doris-storage
+
+# Cold storage settings
+enable_storage_cold_separation = true
+EOF
+else
+  cat >> /opt/doris/be/conf/be.conf <<EOF
+storage_root_path = /opt/doris/be/storage
+EOF
+fi
 
 # Create systemd service
 cat > /etc/systemd/system/doris-be.service <<EOF

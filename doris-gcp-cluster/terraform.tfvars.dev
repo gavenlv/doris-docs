@@ -1,0 +1,51 @@
+# DEV Environment Configuration
+# Project: doris-dev-project
+
+project_id = "doris-dev-project"
+environment = "dev"
+cluster_name = "doris"
+
+region = "us-central1"
+zone = "us-central1-a"
+
+subnet_cidr = "10.0.0.0/16"
+allowed_source_ranges = ["0.0.0.0/0"]
+
+# FE Configuration - Dev: 1FE
+fe_count = 1
+fe_machine_type = "e2-medium"
+fe_disk_size = 50
+fe_disk_type = "pd-balanced"
+fe_preemptible = false
+
+# BE Configuration - Dev: 2BE
+be_count = 2
+be_machine_type = "e2-standard-2"
+be_disk_size = 100
+be_disk_type = "pd-ssd"
+be_preemptible = false
+
+# Storage Configuration
+enable_compute_storage_separation = true
+gcs_bucket_name = "doris-dev-storage"
+hot_storage_type = "pd-ssd"
+hot_storage_size = 200
+cold_storage_retention_days = 7
+
+# Auto Scaling Configuration
+enable_autoscaling = true
+be_min_count = 2
+be_max_count = 5
+autoscaling_cpu_target = 70
+autoscaling_scale_up_cooldown = 300
+autoscaling_scale_down_cooldown = 300
+
+# Load Balancer Configuration
+enable_load_balancer = true
+
+# SSH Configuration
+ssh_user = "ubuntu"
+ssh_public_key_path = "~/.ssh/id_rsa.pub"
+
+# Image Configuration
+image_family = "ubuntu-2204-lts"

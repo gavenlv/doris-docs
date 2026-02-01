@@ -1,0 +1,51 @@
+# PROD Environment Configuration
+# Project: doris-prod-project
+
+project_id = "doris-prod-project"
+environment = "prod"
+cluster_name = "doris"
+
+region = "us-east1"
+zone = "us-east1-b"
+
+subnet_cidr = "10.3.0.0/16"
+allowed_source_ranges = ["10.0.0.0/8", "192.168.0.0/16"]
+
+# FE Configuration - PROD: 3FE for HA
+fe_count = 3
+fe_machine_type = "e2-standard-4"
+fe_disk_size = 200
+fe_disk_type = "pd-ssd"
+fe_preemptible = false
+
+# BE Configuration - PROD: 5BE initial, will autoscale
+be_count = 5
+be_machine_type = "e2-standard-16"
+be_disk_size = 500
+be_disk_type = "pd-ssd"
+be_preemptible = false
+
+# Storage Configuration
+enable_compute_storage_separation = true
+gcs_bucket_name = "doris-prod-storage"
+hot_storage_type = "pd-ssd"
+hot_storage_size = 1000
+cold_storage_retention_days = 90
+
+# Auto Scaling Configuration
+enable_autoscaling = true
+be_min_count = 5
+be_max_count = 20
+autoscaling_cpu_target = 60
+autoscaling_scale_up_cooldown = 300
+autoscaling_scale_down_cooldown = 300
+
+# Load Balancer Configuration
+enable_load_balancer = true
+
+# SSH Configuration
+ssh_user = "ubuntu"
+ssh_public_key_path = "~/.ssh/id_rsa.pub"
+
+# Image Configuration
+image_family = "ubuntu-2204-lts"

@@ -129,3 +129,78 @@ variable "fe_servers" {
   type        = string
   default     = "fe1:10.0.0.11:9010"
 }
+
+# Compute Storage Separation Configuration
+variable "enable_compute_storage_separation" {
+  description = "Enable compute-storage separation with GCS"
+  type        = bool
+  default     = false
+}
+
+variable "gcs_bucket_name" {
+  description = "GCS bucket name for cold storage"
+  type        = string
+  default     = ""
+}
+
+variable "hot_storage_type" {
+  description = "Hot storage disk type"
+  type        = string
+  default     = "pd-ssd"
+}
+
+variable "hot_storage_size" {
+  description = "Hot storage disk size in GB"
+  type        = number
+  default     = 200
+}
+
+variable "cold_storage_retention_days" {
+  description = "Cold data retention days in GCS"
+  type        = number
+  default     = 7
+}
+
+# Auto Scaling Configuration
+variable "enable_autoscaling" {
+  description = "Enable auto scaling for BE instances"
+  type        = bool
+  default     = false
+}
+
+variable "be_min_count" {
+  description = "Minimum number of BE instances for auto scaling"
+  type        = number
+  default     = 2
+}
+
+variable "be_max_count" {
+  description = "Maximum number of BE instances for auto scaling"
+  type        = number
+  default     = 5
+}
+
+variable "autoscaling_cpu_target" {
+  description = "CPU utilization target for auto scaling (percentage)"
+  type        = number
+  default     = 70
+}
+
+variable "autoscaling_scale_up_cooldown" {
+  description = "Cooldown period for scale up in seconds"
+  type        = number
+  default     = 300
+}
+
+variable "autoscaling_scale_down_cooldown" {
+  description = "Cooldown period for scale down in seconds"
+  type        = number
+  default     = 300
+}
+
+# Load Balancer Configuration
+variable "enable_load_balancer" {
+  description = "Enable internal load balancer for FE"
+  type        = bool
+  default     = false
+}

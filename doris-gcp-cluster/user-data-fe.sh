@@ -2,13 +2,17 @@
 set -e
 
 CLUSTER_NAME="${cluster_name}"
+ENVIRONMENT="${environment}"
 FE_SERVERS="${fe_servers}"
 FE_ID="${fe_id}"
+GCS_BUCKET="${gcs_bucket}"
 
 echo "Starting Doris FE instance setup (Native Deployment)..."
 echo "Cluster: ${CLUSTER_NAME}"
+echo "Environment: ${ENVIRONMENT}"
 echo "FE ID: ${FE_ID}"
 echo "FE Servers: ${FE_SERVERS}"
+echo "GCS Bucket: ${GCS_BUCKET}"
 
 # Update system
 apt-get update && apt-get upgrade -y
@@ -20,7 +24,8 @@ apt-get install -y \
     curl \
     vim \
     net-tools \
-    lsof
+    lsof \
+    google-cloud-sdk
 
 # Set Java environment
 cat >> /etc/profile.d/java.sh <<EOF
@@ -95,7 +100,16 @@ meta_delay_toleration_second = 10
 enable_token_check = true
 
 enable_deploy_manager = true
+
+# Compute-Storage Separation Configuration
 EOF
+
+if [ -n "${GCS_BUCKET}" ]; then
+  cat >> /opt/doris/fe/conf/fe.conf <<EOF
+enable_storage_cold_separation = true
+storage_root_path = /opt/doris/fe/doris-meta,${GCS_BUCKET}
+EOF
+fi
 
 # Create systemd service
 cat > /etc/systemd/system/doris-fe.service <<EOF

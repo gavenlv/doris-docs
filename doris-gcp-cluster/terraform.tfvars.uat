@@ -1,0 +1,51 @@
+# UAT Environment Configuration
+# Project: doris-uat-project
+
+project_id = "doris-uat-project"
+environment = "uat"
+cluster_name = "doris"
+
+region = "us-east1"
+zone = "us-east1-b"
+
+subnet_cidr = "10.2.0.0/16"
+allowed_source_ranges = ["10.0.0.0/8", "192.168.0.0/16"]
+
+# FE Configuration - UAT: 2FE for HA
+fe_count = 2
+fe_machine_type = "e2-standard-2"
+fe_disk_size = 100
+fe_disk_type = "pd-ssd"
+fe_preemptible = false
+
+# BE Configuration - UAT: 4BE
+be_count = 4
+be_machine_type = "e2-standard-8"
+be_disk_size = 300
+be_disk_type = "pd-ssd"
+fe_preemptible = false
+
+# Storage Configuration
+enable_compute_storage_separation = true
+gcs_bucket_name = "doris-uat-storage"
+hot_storage_type = "pd-ssd"
+hot_storage_size = 600
+cold_storage_retention_days = 30
+
+# Auto Scaling Configuration
+enable_autoscaling = true
+be_min_count = 4
+be_max_count = 10
+autoscaling_cpu_target = 60
+autoscaling_scale_up_cooldown = 300
+autoscaling_scale_down_cooldown = 300
+
+# Load Balancer Configuration
+enable_load_balancer = true
+
+# SSH Configuration
+ssh_user = "ubuntu"
+ssh_public_key_path = "~/.ssh/id_rsa.pub"
+
+# Image Configuration
+image_family = "ubuntu-2204-lts"
