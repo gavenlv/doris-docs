@@ -1,0 +1,61 @@
+# SIT Environment - Compute Storage Separation Configuration
+# Project: doris-sit-project
+
+project_id = "doris-sit-project"
+environment = "sit"
+cluster_name = "doris-separation"
+
+region = "us-central1"
+zone = "us-central1-a"
+
+subnet_cidr = "10.1.0.0/16"
+allowed_source_ranges = ["10.0.0.0/8", "192.168.0.0/16"]
+
+# FE Configuration - SIT: 2FE for HA
+fe_count = 2
+fe_machine_type = "e2-medium"
+fe_disk_size = 50
+fe_disk_type = "pd-balanced"
+fe_preemptible = false
+
+# BE Configuration - SIT: 3BE initial
+be_count = 3
+be_machine_type = "e2-standard-4"
+be_preemptible = false
+
+# ============================================================
+# Compute Storage Separation Configuration
+# ============================================================
+
+# GCS Bucket for Cold Storage
+gcs_bucket_name = "doris-sit-separation-storage"
+
+# Hot Storage (SSD) - Local storage for hot data
+hot_storage_type = "pd-ssd"
+hot_storage_size = 400
+
+# Cold Storage Retention
+cold_storage_retention_days = 30
+
+# ============================================================
+# Auto Scaling Configuration
+# ============================================================
+
+be_min_count = 3
+be_max_count = 8
+autoscaling_cpu_target = 65
+autoscaling_scale_up_cooldown = 300
+autoscaling_scale_down_cooldown = 300
+
+# ============================================================
+# SSH Configuration
+# ============================================================
+
+ssh_user = "ubuntu"
+ssh_public_key_path = "~/.ssh/id_rsa.pub"
+
+# ============================================================
+# Image Configuration
+# ============================================================
+
+image_family = "ubuntu-2204-lts"

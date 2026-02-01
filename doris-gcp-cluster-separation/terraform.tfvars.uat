@@ -1,0 +1,61 @@
+# UAT Environment - Compute Storage Separation Configuration
+# Project: doris-uat-project
+
+project_id = "doris-uat-project"
+environment = "uat"
+cluster_name = "doris-separation"
+
+region = "us-east1"
+zone = "us-east1-b"
+
+subnet_cidr = "10.2.0.0/16"
+allowed_source_ranges = ["10.0.0.0/8", "192.168.0.0/16"]
+
+# FE Configuration - UAT: 2FE for HA
+fe_count = 2
+fe_machine_type = "e2-standard-2"
+fe_disk_size = 100
+fe_disk_type = "pd-ssd"
+fe_preemptible = false
+
+# BE Configuration - UAT: 4BE initial
+be_count = 4
+be_machine_type = "e2-standard-8"
+be_preemptible = false
+
+# ============================================================
+# Compute Storage Separation Configuration
+# ============================================================
+
+# GCS Bucket for Cold Storage
+gcs_bucket_name = "doris-uat-separation-storage"
+
+# Hot Storage (SSD) - Local storage for hot data
+hot_storage_type = "pd-ssd"
+hot_storage_size = 600
+
+# Cold Storage Retention
+cold_storage_retention_days = 30
+
+# ============================================================
+# Auto Scaling Configuration
+# ============================================================
+
+be_min_count = 4
+be_max_count = 10
+autoscaling_cpu_target = 60
+autoscaling_scale_up_cooldown = 300
+autoscaling_scale_down_cooldown = 300
+
+# ============================================================
+# SSH Configuration
+# ============================================================
+
+ssh_user = "ubuntu"
+ssh_public_key_path = "~/.ssh/id_rsa.pub"
+
+# ============================================================
+# Image Configuration
+# ============================================================
+
+image_family = "ubuntu-2204-lts"
