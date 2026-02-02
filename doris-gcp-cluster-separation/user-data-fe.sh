@@ -10,7 +10,7 @@ FDB_CLUSTER_FILE="${fdb_cluster_file}"
 FDB_ENABLED="${fdb_enabled}"
 
 echo "========================================"
-echo "Doris FE Setup - Compute Storage Separation"
+echo "Doris FE Setup - Private Network Mode"
 echo "With FoundationDB High Availability"
 echo "========================================"
 echo "Cluster: ${CLUSTER_NAME}"
@@ -20,6 +20,9 @@ echo "FE Servers: ${FE_SERVERS}"
 echo "GCS Bucket: ${GCS_BUCKET}"
 echo "FDB Enabled: ${FDB_ENABLED}"
 echo "FDB Cluster: ${FDB_CLUSTER_FILE}"
+echo "Artifacts: gs://${GCS_BUCKET}-artifacts"
+echo "========================================"
+echo "NOTE: Running in private network - all packages from GCS"
 echo "========================================"
 
 # Update system
@@ -55,14 +58,15 @@ if lsblk | grep -q "sdb"; then
     echo '/dev/sdb /opt/doris/fe/doris-meta ext4 defaults,nofail 0 2' >> /etc/fstab
 fi
 
-# Download Doris FE
+# Download Doris FE from internal GCS bucket (no internet access)
 DORIS_VERSION="4.0.2"
-DORIS_MIRROR="https://archive.apache.org/dist/doris"
+ARTIFACTS_BUCKET="${gcs_bucket}-artifacts"
 FE_PACKAGE="apache-doris-fe-${DORIS_VERSION}-bin-x86_64.tar.gz"
 
-echo "Downloading Doris FE ${DORIS_VERSION}..."
+echo "Downloading Doris FE ${DORIS_VERSION} from GCS..."
 if [ ! -d "/opt/doris/fe/bin" ]; then
-    wget -q ${DORIS_MIRROR}/${DORIS_VERSION}/${FE_PACKAGE} -O /tmp/${FE_PACKAGE}
+    # Use gsutil to download from private bucket
+    gsutil cp "gs://${ARTIFACTS_BUCKET}/doris/${FE_PACKAGE}" /tmp/${FE_PACKAGE}
     
     # Extract and install
     mkdir -p /opt/doris
@@ -75,14 +79,15 @@ mkdir -p /opt/doris/fe/doris-meta
 mkdir -p /opt/doris/fe/log
 mkdir -p /opt/doris/fe/conf
 
-# Install FoundationDB client if enabled
+# Install FoundationDB client if enabled (from internal GCS)
 if [ "${FDB_ENABLED}" = "true" ]; then
-    echo "Installing FoundationDB client..."
+    echo "Installing FoundationDB client from GCS..."
     FDB_VERSION="7.3.27"
+    ARTIFACTS_BUCKET="${gcs_bucket}-artifacts"
     FDB_CLIENT_PKG="foundationdb-clients_${FDB_VERSION}-1_amd64.deb"
-    FDB_BASE_URL="https://github.com/apple/foundationdb/releases/download/${FDB_VERSION}"
     
-    wget -q ${FDB_BASE_URL}/${FDB_CLIENT_PKG} -O /tmp/${FDB_CLIENT_PKG}
+    # Download from private GCS bucket
+    gsutil cp "gs://${ARTIFACTS_BUCKET}/foundationdb/${FDB_CLIENT_PKG}" /tmp/${FDB_CLIENT_PKG}
     dpkg -i /tmp/${FDB_CLIENT_PKG} || apt-get install -f -y
     
     # Create FDB cluster file

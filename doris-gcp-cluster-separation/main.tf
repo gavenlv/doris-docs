@@ -21,11 +21,13 @@ locals {
 }
 
 # ============================================================
-# Network Configuration
+# Private Network Configuration (No Internet Access)
 # ============================================================
 
 resource "google_compute_network" "doris_network" {
-  name = "${local.cluster_name}-network"
+  name                    = "${local.cluster_name}-network"
+  auto_create_subnetworks = false
+  # 创建私有网络，不自动创建子网
 }
 
 resource "google_compute_subnetwork" "doris_subnet" {
@@ -33,6 +35,38 @@ resource "google_compute_subnetwork" "doris_subnet" {
   ip_cidr_range = var.subnet_cidr
   network       = google_compute_network.doris_network.id
   region        = var.region
+  
+  # 配置私有 Google 访问（允许访问 GCS 等 Google API）
+  private_ip_google_access = true
+  
+  # 配置 VPC Flow Logs
+  log_config {
+    aggregation_interval = "INTERVAL_5_SEC"
+    flow_sampling        = 0.5
+    metadata             = "INCLUDE_ALL_METADATA"
+  }
+}
+
+# 创建 Cloud NAT（仅用于出站访问 Google API，如 GCS）
+resource "google_compute_router" "router" {
+  count   = var.enable_nat ? 1 : 0
+  name    = "${local.cluster_name}-router"
+  region  = var.region
+  network = google_compute_network.doris_network.id
+}
+
+resource "google_compute_router_nat" "nat" {
+  count                              = var.enable_nat ? 1 : 0
+  name                               = "${local.cluster_name}-nat"
+  router                             = google_compute_router.router[0].name
+  region                             = var.region
+  nat_ip_allocate_option             = "AUTO_ONLY"
+  source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
+  
+  log_config {
+    enable = true
+    filter = "ERRORS_ONLY"
+  }
 }
 
 resource "google_compute_firewall" "allow_internal" {

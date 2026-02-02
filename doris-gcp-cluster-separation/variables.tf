@@ -204,3 +204,19 @@ variable "autoscaling_scale_down_cooldown" {
   type        = number
   default     = 300
 }
+
+# ============================================================
+# Private Network Configuration
+# ============================================================
+
+variable "enable_nat" {
+  description = "Enable Cloud NAT for outbound internet access (to GCS only)"
+  type        = bool
+  default     = true
+}
+
+variable "private_network_only" {
+  description = "Deploy in private network only mode (no public IPs)"
+  type        = bool
+  default     = false
+}

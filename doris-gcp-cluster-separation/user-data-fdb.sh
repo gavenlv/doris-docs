@@ -8,13 +8,14 @@ FDB_COUNT="${fdb_count}"
 FDB_COORDINATORS="${fdb_coordinators}"
 
 echo "========================================"
-echo "FoundationDB Setup"
+echo "FoundationDB Setup (Private Network)"
 echo "========================================"
 echo "Cluster: ${CLUSTER_NAME}"
 echo "Version: ${FDB_VERSION}"
 echo "FDB ID: ${FDB_ID}"
 echo "FDB Count: ${FDB_COUNT}"
 echo "Coordinators: ${FDB_COORDINATORS}"
+echo "Artifacts: gs://${CLUSTER_NAME%-fdb}-artifacts"
 echo "========================================"
 
 # Update system
@@ -41,15 +42,16 @@ if lsblk | grep -q "sdb"; then
     echo '/dev/sdb /var/lib/foundationdb/data ext4 defaults,nofail 0 2' >> /etc/fstab
 fi
 
-# Download and install FoundationDB
-echo "Installing FoundationDB ${FDB_VERSION}..."
+# Download and install FoundationDB from internal GCS bucket
+echo "Installing FoundationDB ${FDB_VERSION} from GCS..."
+ARTIFACTS_BUCKET="${cluster_name%-fdb}-artifacts"
 FDB_CLIENT_PKG="foundationdb-clients_${FDB_VERSION}-1_amd64.deb"
 FDB_SERVER_PKG="foundationdb-server_${FDB_VERSION}-1_amd64.deb"
-FDB_BASE_URL="https://github.com/apple/foundationdb/releases/download/${FDB_VERSION}"
 
 if [ ! -f "/usr/sbin/fdbserver" ]; then
-    wget -q ${FDB_BASE_URL}/${FDB_CLIENT_PKG} -O /tmp/${FDB_CLIENT_PKG}
-    wget -q ${FDB_BASE_URL}/${FDB_SERVER_PKG} -O /tmp/${FDB_SERVER_PKG}
+    # Download from private GCS bucket
+    gsutil cp "gs://${ARTIFACTS_BUCKET}/foundationdb/${FDB_CLIENT_PKG}" /tmp/${FDB_CLIENT_PKG}
+    gsutil cp "gs://${ARTIFACTS_BUCKET}/foundationdb/${FDB_SERVER_PKG}" /tmp/${FDB_SERVER_PKG}
     
     dpkg -i /tmp/${FDB_CLIENT_PKG} || apt-get install -f -y
     dpkg -i /tmp/${FDB_SERVER_PKG} || apt-get install -f -y

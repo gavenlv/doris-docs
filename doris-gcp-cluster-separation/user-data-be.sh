@@ -10,7 +10,7 @@ HOT_STORAGE_PATH="${hot_storage_path}"
 COLD_STORAGE_PATH="${cold_storage_path}"
 
 echo "========================================"
-echo "Doris BE Setup - Compute Storage Separation"
+echo "Doris BE Setup - Private Network Mode"
 echo "========================================"
 echo "Cluster: ${CLUSTER_NAME}"
 echo "Environment: ${ENVIRONMENT}"
@@ -19,23 +19,29 @@ echo "FE Servers: ${FE_SERVERS}"
 echo "GCS Bucket: ${GCS_BUCKET}"
 echo "Hot Storage: ${HOT_STORAGE_PATH}"
 echo "Cold Storage: ${COLD_STORAGE_PATH}"
+echo "Artifacts: gs://${GCS_BUCKET}-artifacts"
+echo "========================================"
+echo "NOTE: Running in private network - all packages from GCS"
 echo "========================================"
 
 # Update system
 apt-get update && apt-get upgrade -y
 
-# Install dependencies
+# Install dependencies (from internal repository or pre-installed)
 apt-get install -y \
     openjdk-11-jdk \
-    wget \
     curl \
     vim \
     net-tools \
     lsof \
     uuid-runtime \
-    libaio1 \
-    google-cloud-cli \
-    gcsfuse
+    libaio1
+
+# Install gcsfuse from GCS bucket (no internet)
+ARTIFACTS_BUCKET="${gcs_bucket}-artifacts"
+echo "Installing gcsfuse from GCS..."
+gsutil cp "gs://${ARTIFACTS_BUCKET}/tools/gcsfuse_latest_amd64.deb" /tmp/gcsfuse.deb
+dpkg -i /tmp/gcsfuse.deb || apt-get install -f -y
 
 # Set Java environment
 cat >> /etc/profile.d/java.sh <<EOF
@@ -60,14 +66,15 @@ echo "Mounting GCS bucket for cold storage..."
 mkdir -p /mnt/gcs-cold-storage
 gcsfuse ${GCS_BUCKET} /mnt/gcs-cold-storage || echo "GCS mount will be configured later"
 
-# Download Doris BE
+# Download Doris BE from internal GCS bucket (no internet access)
 DORIS_VERSION="4.0.2"
-DORIS_MIRROR="https://archive.apache.org/dist/doris"
+ARTIFACTS_BUCKET="${gcs_bucket}-artifacts"
 BE_PACKAGE="apache-doris-be-${DORIS_VERSION}-bin-x86_64.tar.gz"
 
-echo "Downloading Doris BE ${DORIS_VERSION}..."
+echo "Downloading Doris BE ${DORIS_VERSION} from GCS..."
 if [ ! -d "/opt/doris/be/bin" ]; then
-    wget -q ${DORIS_MIRROR}/${DORIS_VERSION}/${BE_PACKAGE} -O /tmp/${BE_PACKAGE}
+    # Use gsutil to download from private bucket
+    gsutil cp "gs://${ARTIFACTS_BUCKET}/doris/${BE_PACKAGE}" /tmp/${BE_PACKAGE}
     
     # Extract and install
     mkdir -p /opt/doris
