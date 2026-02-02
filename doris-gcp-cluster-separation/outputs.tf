@@ -76,3 +76,14 @@ output "sql_examples" {
     alter_table_policy       = "ALTER TABLE example SET ('storage_policy' = 'hot_to_cold');"
   }
 }
+
+output "architecture_info" {
+  description = "Architecture overview"
+  value = {
+    fe_ha_enabled = true
+    fdb_enabled   = true
+    storage_separation = true
+    be_autoscaling = true
+    description = "Doris cluster with FoundationDB for FE HA, GCS for cold storage, and auto-scaling BE"
+  }
+}

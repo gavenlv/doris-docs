@@ -11,12 +11,17 @@ zone = "us-central1-a"
 subnet_cidr = "10.0.0.0/16"
 allowed_source_ranges = ["0.0.0.0/0"]
 
-# FE Configuration - Dev: 1FE
-fe_count = 1
-fe_machine_type = "e2-medium"
+# FE Configuration - Dev: 2FE for HA with FoundationDB
+fe_count = 2
+fe_machine_type = "e2-standard-2"
 fe_disk_size = 50
 fe_disk_type = "pd-balanced"
 fe_preemptible = false
+
+# FoundationDB Configuration - Dev: 3 nodes for HA
+fdb_count = 3
+fdb_machine_type = "e2-standard-2"
+fdb_disk_size = 50
 
 # BE Configuration - Dev: 2BE initial
 be_count = 2

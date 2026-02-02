@@ -119,6 +119,32 @@ variable "fe_servers" {
 }
 
 # ============================================================
+# FoundationDB Configuration for FE High Availability
+# ============================================================
+
+variable "fdb_count" {
+  description = "Number of FoundationDB instances (minimum 3 for HA)"
+  type        = number
+  default     = 3
+  validation {
+    condition     = var.fdb_count >= 3
+    error_message = "FoundationDB count must be at least 3 for high availability."
+  }
+}
+
+variable "fdb_machine_type" {
+  description = "FoundationDB instance machine type"
+  type        = string
+  default     = "e2-standard-4"
+}
+
+variable "fdb_disk_size" {
+  description = "FoundationDB data disk size in GB"
+  type        = number
+  default     = 100
+}
+
+# ============================================================
 # Compute Storage Separation Configuration
 # ============================================================
 
