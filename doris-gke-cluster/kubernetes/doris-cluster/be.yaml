@@ -1,0 +1,182 @@
+# ==========================================
+# Doris BE StatefulSet with HPA
+# ==========================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: be-config
+  namespace: doris
+data:
+  be.conf: |
+    # BE Configuration for Doris 3.1.4
+    
+    # Network
+    priority_networks = 10.0.0.0/16
+    
+    # Ports
+    be_port = 9060
+    webserver_port = 8040
+    heartbeat_service_port = 9050
+    brpc_port = 8060
+    
+    # Storage Configuration
+    storage_root_path = /mnt/local-ssd,/mnt/gcs-cold-storage
+    
+    # Hot/Cold Storage Tiering
+    enable_storage_cold_separation = true
+    cold_data_threshold = 3  # Days
+    
+    # Performance Tuning for 50B rows/2min ingestion
+    streaming_load_max_mb = 10240
+    streaming_load_rpc_max_alive_time_sec = 1200
+    load_thread_pool_pool_size = 64
+    
+    # Parallel Execution
+    parallel_fragment_exec_instance_num = 16
+    num_scanner_threads = 64
+    
+    # Memory Configuration
+    memory_limitation_per_thread_for_schema_change = 4294967296
+    memory_max_alignment = 1073741824
+    
+    # Query Cache (40GB per node)
+    enable_query_cache = true
+    query_cache_capacity = 40GB
+    
+    # Compaction
+    base_compaction_num_threads_per_disk = 4
+    cumulative_compaction_num_threads_per_disk = 4
+    
+    # Logging
+    sys_log_dir = /opt/doris/be/log
+    sys_log_level = INFO
+    
+    # Other
+    default_rowset_type = beta
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: be
+  namespace: doris
+  labels:
+    app: be
+spec:
+  serviceName: be
+  replicas: 5  # Initial replicas, will be managed by HPA
+  selector:
+    matchLabels:
+      app: be
+  template:
+    metadata:
+      labels:
+        app: be
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - be
+              topologyKey: "kubernetes.io/hostname"
+      nodeSelector:
+        role: be
+      tolerations:
+      - key: spot
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+      containers:
+      - name: be
+        image: nexus.company.com/doris/be:3.1.4
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9060
+          name: be-port
+        - containerPort: 8040
+          name: webserver-port
+        - containerPort: 9050
+          name: heartbeat-port
+        - containerPort: 8060
+          name: brpc-port
+        env:
+        - name: FE_SERVERS
+          value: "fe1:10.0.0.21:9010,fe2:10.0.0.22:9010,fe3:10.0.0.23:9010"
+        volumeMounts:
+        - name: local-ssd
+          mountPath: /mnt/local-ssd
+        - name: gcs-cold-storage
+          mountPath: /mnt/gcs-cold-storage
+        - name: be-config
+          mountPath: /opt/doris/be/conf
+        resources:
+          limits:
+            cpu: 16
+            memory: 64Gi
+          requests:
+            cpu: 8
+            memory: 32Gi
+        livenessProbe:
+          tcpSocket:
+            port: 9050
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: 9050
+          initialDelaySeconds: 30
+          periodSeconds: 5
+      volumes:
+      - name: be-config
+        configMap:
+          name: be-config
+      - name: gcs-cold-storage
+        persistentVolumeClaim:
+          claimName: gcs-cold-storage-pvc
+      imagePullSecrets:
+      - name: nexus-secret
+  volumeClaimTemplates:
+  - metadata:
+      name: local-ssd
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: local-ssd
+      resources:
+        requests:
+          storage: 1500Gi
+---
+# PVC for GCS Cold Storage
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gcs-cold-storage-pvc
+  namespace: doris
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: gcs-fuse
+  resources:
+    requests:
+      storage: 100Ti
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: be
+  namespace: doris
+spec:
+  clusterIP: None
+  selector:
+    app: be
+  ports:
+  - port: 9060
+    name: be-port
+  - port: 8040
+    name: webserver-port
+  - port: 9050
+    name: heartbeat-port

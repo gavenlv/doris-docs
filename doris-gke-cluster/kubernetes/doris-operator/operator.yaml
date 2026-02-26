@@ -1,0 +1,102 @@
+# ==========================================
+# Doris Operator Deployment
+# ==========================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: doris-operator
+  namespace: doris
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: doris-operator
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  - services
+  - endpoints
+  - persistentvolumeclaims
+  - events
+  - configmaps
+  - secrets
+  verbs:
+  - '*'
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  - daemonsets
+  - replicasets
+  - statefulsets
+  verbs:
+  - '*'
+- apiGroups:
+  - monitoring.coreos.com
+  resources:
+  - servicemonitors
+  verbs:
+  - get
+  - create
+- apiGroups:
+  - doris.apache.org
+  resources:
+  - '*'
+  verbs:
+  - '*'
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: doris-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: doris-operator
+subjects:
+- kind: ServiceAccount
+  name: doris-operator
+  namespace: doris
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: doris-operator
+  namespace: doris
+  labels:
+    app: doris-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: doris-operator
+  template:
+    metadata:
+      labels:
+        app: doris-operator
+    spec:
+      serviceAccountName: doris-operator
+      containers:
+      - name: operator
+        image: nexus.company.com/doris-operator:v1.1.0
+        imagePullPolicy: Always
+        env:
+        - name: WATCH_NAMESPACE
+          value: doris
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: OPERATOR_NAME
+          value: "doris-operator"
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 200m
+            memory: 256Mi
+      imagePullSecrets:
+      - name: nexus-secret

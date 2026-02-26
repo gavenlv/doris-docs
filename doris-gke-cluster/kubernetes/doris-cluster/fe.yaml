@@ -1,0 +1,167 @@
+# ==========================================
+# Doris FE StatefulSet
+# ==========================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fe-config
+  namespace: doris
+data:
+  fe.conf: |
+    # FE Configuration for Doris 3.1.4
+    
+    # Network
+    priority_networks = 10.0.0.0/16
+    
+    # Ports
+    http_port = 8030
+    rpc_port = 9020
+    query_port = 9030
+    edit_log_port = 9010
+    arrow_flight_sql_port = 9070
+    
+    # FoundationDB Configuration
+    meta_store_type = foundationdb
+    fdb_cluster_file_path = /etc/foundationdb/fdb.cluster
+    
+    # Memory Configuration
+    JAVA_OPTS = "-Xmx8g -Xms8g -Xmn4g"
+    
+    # Query Configuration
+    max_connections = 4096
+    max_conn_per_user = 100
+    
+    # Enable Query Cache
+    enable_query_cache = true
+    query_cache_capacity = 40GB
+    
+    # Logging
+    sys_log_dir = /opt/doris/fe/log
+    sys_log_level = INFO
+    
+    # Other
+    enable_https = false
+    enable_auth = true
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: fe
+  namespace: doris
+  labels:
+    app: fe
+spec:
+  serviceName: fe
+  replicas: 3
+  selector:
+    matchLabels:
+      app: fe
+  template:
+    metadata:
+      labels:
+        app: fe
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - fe
+            topologyKey: "kubernetes.io/hostname"
+      nodeSelector:
+        pool: core
+      containers:
+      - name: fe
+        image: nexus.company.com/doris/fe:3.1.4
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8030
+          name: http-port
+        - containerPort: 9020
+          name: rpc-port
+        - containerPort: 9030
+          name: query-port
+        - containerPort: 9010
+          name: edit-log-port
+        env:
+        - name: FE_SERVERS
+          value: "fe1:10.0.0.21:9010,fe2:10.0.0.22:9010,fe3:10.0.0.23:9010"
+        volumeMounts:
+        - name: fe-data
+          mountPath: /opt/doris/fe/doris-meta
+        - name: fe-config
+          mountPath: /opt/doris/fe/conf
+        - name: fdb-config
+          mountPath: /etc/foundationdb
+        resources:
+          limits:
+            cpu: 8
+            memory: 16Gi
+          requests:
+            cpu: 4
+            memory: 8Gi
+        livenessProbe:
+          tcpSocket:
+            port: 9030
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: 9030
+          initialDelaySeconds: 30
+          periodSeconds: 5
+      volumes:
+      - name: fe-config
+        configMap:
+          name: fe-config
+      - name: fdb-config
+        configMap:
+          name: fdb-config
+      imagePullSecrets:
+      - name: nexus-secret
+  volumeClaimTemplates:
+  - metadata:
+      name: fe-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: pd-ssd
+      resources:
+        requests:
+          storage: 100Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fe
+  namespace: doris
+spec:
+  ports:
+  - port: 8030
+    name: http-port
+  - port: 9020
+    name: rpc-port
+  - port: 9030
+    name: query-port
+  selector:
+    app: fe
+---
+# Internal Load Balancer for FE
+apiVersion: v1
+kind: Service
+metadata:
+  name: fe-lb
+  namespace: doris
+  annotations:
+    networking.gke.io/load-balancer-type: "Internal"
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 9030
+    name: query-port
+  - port: 8030
+    name: http-port
+  selector:
+    app: fe

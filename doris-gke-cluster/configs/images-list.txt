@@ -1,0 +1,33 @@
+# Doris GKE Cluster - Required Docker Images
+# Version: Doris 3.1.4 Stable
+# Last Updated: 2026-02-26
+
+# ==========================================
+# Doris Core Components
+# ==========================================
+apache/doris:fe-3.1.4
+apache/doris:be-3.1.4
+
+# ==========================================
+# FoundationDB (for Doris Compute-Storage Separation)
+# ==========================================
+foundationdb/foundationdb:7.1.37
+
+# ==========================================
+# Doris Operator
+# ==========================================
+apache/doris-operator:v1.1.0
+
+# ==========================================
+# Monitoring Components (Optional)
+# ==========================================
+prom/prometheus:v2.45.0
+grafana/grafana:10.2.0
+
+# ==========================================
+# Version Notes
+# ==========================================
+# - Doris 3.1.4: Current stable version for production
+# - FoundationDB 7.1.37: Compatible with Doris 3.1.x
+# - Doris Operator v1.1.0: Supports Doris 3.1.x
+# - All versions are production-ready and tested

@@ -1,0 +1,75 @@
+# Nexus Docker Registry Configuration
+# For Doris GKE Cluster Deployment
+
+# ==========================================
+# Nexus Registry Settings
+# ==========================================
+nexus:
+  # Nexus server URL (update with your company's Nexus URL)
+  url: nexus.company.com
+  port: 8082  # Docker repository port
+  # Alternative format: nexus.company.com:8082
+  
+  # Nexus credentials (use environment variables or Kubernetes secrets)
+  username: ${NEXUS_USERNAME}
+  password: ${NEXUS_PASSWORD}
+  
+  # Docker repository name in Nexus
+  repository: doris
+
+# ==========================================
+# Image Mapping Configuration
+# ==========================================
+# Format: <source_image>:<tag> -> <nexus_image>:<tag>
+image_mappings:
+  # Doris Components
+  - source: apache/doris:fe-3.1.4
+    target: nexus.company.com/doris/fe:3.1.4
+    
+  - source: apache/doris:be-3.1.4
+    target: nexus.company.com/doris/be:3.1.4
+    
+  - source: foundationdb/foundationdb:7.1.37
+    target: nexus.company.com/foundationdb:7.1.37
+    
+  - source: apache/doris-operator:v1.1.0
+    target: nexus.company.com/doris-operator:v1.1.0
+    
+  # Monitoring Components (Optional)
+  - source: prom/prometheus:v2.45.0
+    target: nexus.company.com/prometheus:v2.45.0
+    
+  - source: grafana/grafana:10.2.0
+    target: nexus.company.com/grafana:10.2.0
+
+# ==========================================
+# Kubernetes Secret Configuration
+# ==========================================
+kubernetes:
+  namespace: doris
+  secret_name: nexus-secret
+  # Secret will be created with:
+  # kubectl create secret docker-registry nexus-secret \
+  #   --docker-server=nexus.company.com \
+  #   --docker-username=${NEXUS_USERNAME} \
+  #   --docker-password=${NEXUS_PASSWORD} \
+  #   --docker-email=admin@company.com \
+  #   -n doris
+
+# ==========================================
+# Proxy Configuration (if needed)
+# ==========================================
+proxy:
+  enabled: false
+  http_proxy: http://proxy.company.com:8080
+  https_proxy: http://proxy.company.com:8080
+  no_proxy: localhost,127.0.0.1,.company.com
+
+# ==========================================
+# Notes
+# ==========================================
+# 1. Update nexus.url with your company's Nexus server URL
+# 2. Set NEXUS_USERNAME and NEXUS_PASSWORD environment variables
+# 3. Ensure Nexus has a Docker repository named 'doris' (or update repository field)
+# 4. Configure proxy settings if required for internet access
+# 5. Create Kubernetes secret before deploying Doris components

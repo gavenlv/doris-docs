@@ -1,0 +1,28 @@
+# ==========================================
+# Storage Classes for Doris
+# ==========================================
+
+# Local SSD Storage Class
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-ssd
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+allowVolumeExpansion: false
+---
+# GCS Fuse Storage Class (for cold storage)
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gcs-fuse
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+provisioner: gcsfuse.csi.storage.gke.io
+parameters:
+  bucketName: doris-prod-cold-storage  # UPDATE THIS with your bucket name
+reclaimPolicy: Retain
+volumeBindingMode: Immediate

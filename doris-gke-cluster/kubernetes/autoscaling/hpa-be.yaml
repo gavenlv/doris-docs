@@ -1,0 +1,91 @@
+# ==========================================
+# Doris BE Horizontal Pod Autoscaler
+# ==========================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: be-hpa
+  namespace: doris
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: be
+  minReplicas: 5
+  maxReplicas: 25
+  metrics:
+  # CPU-based scaling
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 60
+  # Memory-based scaling
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 180
+      policies:
+      - type: Pods
+        value: 5
+        periodSeconds: 60
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 600
+      policies:
+      - type: Pods
+        value: 2
+        periodSeconds: 120
+      selectPolicy: Min
+---
+# CronJob for time-based scaling (busy hours: 08:00-22:00)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: be-scale-up
+  namespace: doris
+spec:
+  schedule: "0 8 * * *"  # 08:00 daily
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: doris-operator
+          containers:
+          - name: scale-up
+            image: bitnami/kubectl:latest
+            command:
+            - /bin/sh
+            - -c
+            - kubectl patch hpa be-hpa -n doris --type='json' -p='[{"op": "replace", "path": "/spec/minReplicas", "value":15}]'
+          restartPolicy: OnFailure
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: be-scale-down
+  namespace: doris
+spec:
+  schedule: "0 22 * * *"  # 22:00 daily
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: doris-operator
+          containers:
+          - name: scale-down
+            image: bitnami/kubectl:latest
+            command:
+            - /bin/sh
+            - -c
+            - kubectl patch hpa be-hpa -n doris --type='json' -p='[{"op": "replace", "path": "/spec/minReplicas", "value":5}]'
+          restartPolicy: OnFailure

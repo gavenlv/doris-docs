@@ -1,0 +1,95 @@
+# ==========================================
+# FoundationDB StatefulSet (for Doris FE Metadata)
+# ==========================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fdb-config
+  namespace: doris
+data:
+  fdb.cluster: |
+    # FoundationDB Cluster Configuration
+    # Update with actual node IPs after deployment
+    # Format: <id>@<ip>:<port>
+    fdb1@10.0.0.11:4500
+    fdb2@10.0.0.12:4500
+    fdb3@10.0.0.13:4500
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: fdb
+  namespace: doris
+  labels:
+    app: fdb
+spec:
+  serviceName: fdb
+  replicas: 3
+  selector:
+    matchLabels:
+      app: fdb
+  template:
+    metadata:
+      labels:
+        app: fdb
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - fdb
+            topologyKey: "kubernetes.io/hostname"
+      containers:
+      - name: fdb
+        image: nexus.company.com/foundationdb:7.1.37
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 4500
+          name: fdb-port
+        env:
+        - name: FDB_CLUSTER_FILE
+          value: /etc/foundationdb/fdb.cluster
+        volumeMounts:
+        - name: fdb-data
+          mountPath: /var/lib/foundationdb/data
+        - name: fdb-config
+          mountPath: /etc/foundationdb
+        resources:
+          limits:
+            cpu: 4
+            memory: 8Gi
+          requests:
+            cpu: 2
+            memory: 4Gi
+      volumes:
+      - name: fdb-config
+        configMap:
+          name: fdb-config
+      imagePullSecrets:
+      - name: nexus-secret
+  volumeClaimTemplates:
+  - metadata:
+      name: fdb-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: pd-ssd
+      resources:
+        requests:
+          storage: 100Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fdb
+  namespace: doris
+spec:
+  clusterIP: None
+  selector:
+    app: fdb
+  ports:
+  - port: 4500
+    name: fdb-port

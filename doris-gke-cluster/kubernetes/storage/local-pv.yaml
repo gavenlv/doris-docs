@@ -1,0 +1,38 @@
+# ==========================================
+# Local SSD Persistent Volumes Template
+# ==========================================
+# Note: This is a template. You need to create PVs for each node.
+# Use the provided script to generate PV manifests for all nodes.
+
+# Example Local PV for one node
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: local-pv-be-0
+  labels:
+    type: local
+    app: doris-be
+spec:
+  capacity:
+    storage: 1500Gi  # 1.5TB = 4 x 375GB Local SSD
+  volumeMode: Filesystem
+  accessModes:
+  - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-ssd
+  local:
+    path: /mnt/local-ssd  # Mount point for Local SSDs
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - gke-doris-prod-be-core-pool-0  # UPDATE THIS with actual node name
+
+---
+# To create PVs for all BE nodes, use the following script:
+# kubectl get nodes -l role=be -o jsonpath='{.items[*].metadata.name}' | \
+#   tr ' ' '\n' | \
+#   awk '{print "apiVersion: v1\nkind: PersistentVolume\nmetadata:\n  name: local-pv-" $1 "\n  labels:\n    type: local\n    app: doris-be\nspec:\n  capacity:\n    storage: 1500Gi\n  volumeMode: Filesystem\n  accessModes:\n  - ReadWriteOnce\n  persistentVolumeReclaimPolicy: Retain\n  storageClassName: local-ssd\n  local:\n    path: /mnt/local-ssd\n  nodeAffinity:\n    required:\n      nodeSelectorTerms:\n      - matchExpressions:\n        - key: kubernetes.io/hostname\n          operator: In\n          values:\n          - " $1 "\n---\n"}' > local-pvs.yaml

@@ -1,0 +1,98 @@
+# ==========================================
+# Doris GKE Cluster - Production Environment Configuration
+# ==========================================
+# Version: 1.0
+# Environment: Production
+# Last Updated: 2026-02-26
+
+# ==========================================
+# GCP Project Configuration
+# ==========================================
+project_id = "your-project-id"  # UPDATE THIS
+region     = "us-central1"
+zone       = "us-central1-a"
+
+# ==========================================
+# Cluster Configuration
+# ==========================================
+cluster_name       = "doris-prod"
+environment        = "prod"
+kubernetes_version = "1.28"
+
+# ==========================================
+# Network Configuration
+# ==========================================
+network_name  = "doris-prod-vpc"
+subnet_name   = "doris-prod-subnet"
+subnet_cidr   = "10.0.0.0/16"
+pods_cidr     = "10.1.0.0/16"
+services_cidr = "10.2.0.0/16"
+master_cidr   = "172.16.0.0/28"
+
+# ==========================================
+# Node Pool Configuration - Production
+# ==========================================
+
+# Core Node Pool (FE/FDB) - Minimize for cost
+core_pool_machine_type = "n2-standard-4"
+core_pool_min_nodes    = 3
+core_pool_max_nodes    = 5
+core_pool_disk_size    = 100
+
+# BE Core Pool - Baseline capacity
+be_core_pool_machine_type = "n2-standard-16"
+be_core_pool_min_nodes    = 2
+be_core_pool_max_nodes    = 3
+
+# BE Compute Pool - Elastic scaling (Spot VMs)
+be_compute_pool_machine_type = "n2-standard-16"
+be_compute_pool_min_nodes    = 2
+be_compute_pool_max_nodes    = 20
+be_compute_pool_spot         = true
+
+# ==========================================
+# Storage Configuration
+# ==========================================
+gcs_bucket_name              = "doris-prod-cold-storage"  # UPDATE THIS (must be globally unique)
+hot_storage_size_gb          = 1500
+cold_storage_retention_days  = 3
+
+# ==========================================
+# Private Cluster Configuration
+# ==========================================
+enable_private_cluster        = true
+enable_private_endpoint       = true
+enable_private_google_access  = true
+
+# Master authorized networks (for admin access)
+# UPDATE THIS with your company's IP ranges
+master_authorized_networks = [
+  {
+    cidr_block   = "10.0.0.0/8"
+    display_name = "company-network"
+  }
+]
+
+# ==========================================
+# Image Registry Configuration
+# ==========================================
+nexus_url = "nexus.company.com"  # UPDATE THIS
+use_nexus = true
+
+# ==========================================
+# Monitoring Configuration
+# ==========================================
+enable_monitoring = true
+enable_logging    = true
+
+# ==========================================
+# Production Notes
+# ==========================================
+# 1. UPDATE project_id with your GCP project ID
+# 2. UPDATE gcs_bucket_name to a globally unique name
+# 3. UPDATE nexus_url with your company's Nexus server URL
+# 4. UPDATE master_authorized_networks with your company's IP ranges
+# 5. Review and adjust node pool sizes based on your workload
+# 6. Consider using Committed Use Discounts for core nodes (1-3 year commitment)
+# 7. Enable Cloud Monitoring and Logging for observability
+# 8. Set up backup and disaster recovery procedures

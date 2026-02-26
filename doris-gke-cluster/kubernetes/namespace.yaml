@@ -1,0 +1,11 @@
+# ==========================================
+# Doris Namespace
+# ==========================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: doris
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/component: namespace
+    environment: production
