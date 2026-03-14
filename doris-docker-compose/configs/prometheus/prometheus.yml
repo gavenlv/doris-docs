@@ -1,0 +1,39 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Doris FE Metrics
+  - job_name: 'doris-fe'
+    static_configs:
+      - targets:
+          - 'fe1:8030'
+          - 'fe2:8030'
+          - 'fe3:8030'
+        labels:
+          component: 'fe'
+
+  # Doris BE Metrics
+  - job_name: 'doris-be'
+    static_configs:
+      - targets:
+          - 'be1:8040'
+          - 'be2:8040'
+          - 'be3:8040'
+        labels:
+          component: 'be'
+
+  # FoundationDB Metrics
+  - job_name: 'foundationdb'
+    static_configs:
+      - targets:
+          - 'fdb1:4500'
+          - 'fdb2:4500'
+          - 'fdb3:4500'
+        labels:
+          component: 'fdb'
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']

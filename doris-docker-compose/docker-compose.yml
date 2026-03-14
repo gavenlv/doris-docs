@@ -1,0 +1,345 @@
+version: '3.8'
+
+networks:
+  doris-network:
+    driver: bridge
+    name: ${NETWORK_NAME:-doris-local}
+
+volumes:
+  fe1-data:
+  fe2-data:
+  fe3-data:
+  be1-data:
+  be2-data:
+  be3-data:
+  fdb1-data:
+  fdb2-data:
+  fdb3-data:
+  prometheus-data:
+  grafana-data:
+
+services:
+  # ========================================
+  # FoundationDB Cluster (3 nodes for HA)
+  # ========================================
+  fdb1:
+    image: foundationdb/foundationdb:${FDB_VERSION:-7.1.37}
+    container_name: doris-fdb1
+    hostname: fdb1
+    networks:
+      - doris-network
+    environment:
+      - FDB_CLUSTER_FILE=/etc/foundationdb/fdb.cluster
+      - FDB_NETWORKING_MODE=container
+    volumes:
+      - fdb1-data:/var/lib/foundationdb
+      - ./configs/fdb/fdb.cluster:/etc/foundationdb/fdb.cluster
+    command: ["fdbserver", "--public-address=auto:$${FDB_CLUSTER_PORT:-4500}", "--listen-address=0.0.0.0:$${FDB_CLUSTER_PORT:-4500}", "--datadir=/var/lib/foundationdb/data", "--logdir=/var/log/foundationdb"]
+    deploy:
+      resources:
+        limits:
+          memory: ${FDB_MEMORY_LIMIT:-1g}
+    healthcheck:
+      test: ["CMD", "fdbcli", "--exec", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  fdb2:
+    image: foundationdb/foundationdb:${FDB_VERSION:-7.1.37}
+    container_name: doris-fdb2
+    hostname: fdb2
+    networks:
+      - doris-network
+    environment:
+      - FDB_CLUSTER_FILE=/etc/foundationdb/fdb.cluster
+      - FDB_NETWORKING_MODE=container
+    volumes:
+      - fdb2-data:/var/lib/foundationdb
+      - ./configs/fdb/fdb.cluster:/etc/foundationdb/fdb.cluster
+    command: ["fdbserver", "--public-address=auto:$${FDB_CLUSTER_PORT:-4500}", "--listen-address=0.0.0.0:$${FDB_CLUSTER_PORT:-4500}", "--datadir=/var/lib/foundationdb/data", "--logdir=/var/log/foundationdb"]
+    deploy:
+      resources:
+        limits:
+          memory: ${FDB_MEMORY_LIMIT:-1g}
+    healthcheck:
+      test: ["CMD", "fdbcli", "--exec", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  fdb3:
+    image: foundationdb/foundationdb:${FDB_VERSION:-7.1.37}
+    container_name: doris-fdb3
+    hostname: fdb3
+    networks:
+      - doris-network
+    environment:
+      - FDB_CLUSTER_FILE=/etc/foundationdb/fdb.cluster
+      - FDB_NETWORKING_MODE=container
+    volumes:
+      - fdb3-data:/var/lib/foundationdb
+      - ./configs/fdb/fdb.cluster:/etc/foundationdb/fdb.cluster
+    command: ["fdbserver", "--public-address=auto:$${FDB_CLUSTER_PORT:-4500}", "--listen-address=0.0.0.0:$${FDB_CLUSTER_PORT:-4500}", "--datadir=/var/lib/foundationdb/data", "--logdir=/var/log/foundationdb"]
+    deploy:
+      resources:
+        limits:
+          memory: ${FDB_MEMORY_LIMIT:-1g}
+    healthcheck:
+      test: ["CMD", "fdbcli", "--exec", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ========================================
+  # Doris FE Cluster (3 nodes for HA)
+  # ========================================
+  fe1:
+    image: apache/doris:fe-${DORIS_VERSION:-3.1.4}
+    container_name: doris-fe1
+    hostname: fe1
+    networks:
+      - doris-network
+    ports:
+      - "${FE_HTTP_PORT:-8030}:8030"
+      - "${FE_QUERY_PORT:-9030}:9030"
+    environment:
+      - FE_SERVERS=fe1:fe1:9010,fe2:fe2:9010,fe3:fe3:9010
+      - FE_ID=1
+      - FDB_CLUSTER_FILE=/opt/doris/fdb/fdb.cluster
+    volumes:
+      - fe1-data:/opt/doris/fe/doris-meta
+      - ./configs/fe/fe.conf:/opt/doris/fe/conf/fe.conf
+      - ./configs/fdb/fdb.cluster:/opt/doris/fdb/fdb.cluster
+    command: ["bash", "-c", "chmod +x /opt/doris/fe/bin/start_fe.sh && /opt/doris/fe/bin/start_fe.sh --daemon && tail -f /opt/doris/fe/log/fe.out"]
+    deploy:
+      resources:
+        limits:
+          memory: ${FE_MEMORY_LIMIT:-2g}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8030/api/bootstrap"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    depends_on:
+      fdb1:
+        condition: service_healthy
+      fdb2:
+        condition: service_healthy
+      fdb3:
+        condition: service_healthy
+
+  fe2:
+    image: apache/doris:fe-${DORIS_VERSION:-3.1.4}
+    container_name: doris-fe2
+    hostname: fe2
+    networks:
+      - doris-network
+    ports:
+      - "8031:8030"
+      - "9031:9030"
+    environment:
+      - FE_SERVERS=fe1:fe1:9010,fe2:fe2:9010,fe3:fe3:9010
+      - FE_ID=2
+      - FDB_CLUSTER_FILE=/opt/doris/fdb/fdb.cluster
+    volumes:
+      - fe2-data:/opt/doris/fe/doris-meta
+      - ./configs/fe/fe.conf:/opt/doris/fe/conf/fe.conf
+      - ./configs/fdb/fdb.cluster:/opt/doris/fdb/fdb.cluster
+    command: ["bash", "-c", "chmod +x /opt/doris/fe/bin/start_fe.sh && /opt/doris/fe/bin/start_fe.sh --daemon && tail -f /opt/doris/fe/log/fe.out"]
+    deploy:
+      resources:
+        limits:
+          memory: ${FE_MEMORY_LIMIT:-2g}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8030/api/bootstrap"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    depends_on:
+      fdb1:
+        condition: service_healthy
+      fdb2:
+        condition: service_healthy
+      fdb3:
+        condition: service_healthy
+
+  fe3:
+    image: apache/doris:fe-${DORIS_VERSION:-3.1.4}
+    container_name: doris-fe3
+    hostname: fe3
+    networks:
+      - doris-network
+    ports:
+      - "8032:8030"
+      - "9032:9030"
+    environment:
+      - FE_SERVERS=fe1:fe1:9010,fe2:fe2:9010,fe3:fe3:9010
+      - FE_ID=3
+      - FDB_CLUSTER_FILE=/opt/doris/fdb/fdb.cluster
+    volumes:
+      - fe3-data:/opt/doris/fe/doris-meta
+      - ./configs/fe/fe.conf:/opt/doris/fe/conf/fe.conf
+      - ./configs/fdb/fdb.cluster:/opt/doris/fdb/fdb.cluster
+    command: ["bash", "-c", "chmod +x /opt/doris/fe/bin/start_fe.sh && /opt/doris/fe/bin/start_fe.sh --daemon && tail -f /opt/doris/fe/log/fe.out"]
+    deploy:
+      resources:
+        limits:
+          memory: ${FE_MEMORY_LIMIT:-2g}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8030/api/bootstrap"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    depends_on:
+      fdb1:
+        condition: service_healthy
+      fdb2:
+        condition: service_healthy
+      fdb3:
+        condition: service_healthy
+
+  # ========================================
+  # Doris BE Cluster (3 nodes for HA)
+  # ========================================
+  be1:
+    image: apache/doris:be-${DORIS_VERSION:-3.1.4}
+    container_name: doris-be1
+    hostname: be1
+    networks:
+      - doris-network
+    ports:
+      - "8040:8040"
+      - "9050:9050"
+    environment:
+      - BE_ADDR=be1:9050
+      - FDB_CLUSTER_FILE=/opt/doris/fdb/fdb.cluster
+    volumes:
+      - be1-data:/opt/doris/be/storage
+      - ./configs/be/be.conf:/opt/doris/be/conf/be.conf
+      - ./configs/fdb/fdb.cluster:/opt/doris/fdb/fdb.cluster
+    command: ["bash", "-c", "chmod +x /opt/doris/be/bin/start_be.sh && /opt/doris/be/bin/start_be.sh --daemon && tail -f /opt/doris/be/log/be.INFO"]
+    deploy:
+      resources:
+        limits:
+          memory: ${BE_MEMORY_LIMIT:-4g}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8040/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    depends_on:
+      fe1:
+        condition: service_healthy
+
+  be2:
+    image: apache/doris:be-${DORIS_VERSION:-3.1.4}
+    container_name: doris-be2
+    hostname: be2
+    networks:
+      - doris-network
+    ports:
+      - "8041:8040"
+      - "9051:9050"
+    environment:
+      - BE_ADDR=be2:9050
+      - FDB_CLUSTER_FILE=/opt/doris/fdb/fdb.cluster
+    volumes:
+      - be2-data:/opt/doris/be/storage
+      - ./configs/be/be.conf:/opt/doris/be/conf/be.conf
+      - ./configs/fdb/fdb.cluster:/opt/doris/fdb/fdb.cluster
+    command: ["bash", "-c", "chmod +x /opt/doris/be/bin/start_be.sh && /opt/doris/be/bin/start_be.sh --daemon && tail -f /opt/doris/be/log/be.INFO"]
+    deploy:
+      resources:
+        limits:
+          memory: ${BE_MEMORY_LIMIT:-4g}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8040/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    depends_on:
+      fe1:
+        condition: service_healthy
+
+  be3:
+    image: apache/doris:be-${DORIS_VERSION:-3.1.4}
+    container_name: doris-be3
+    hostname: be3
+    networks:
+      - doris-network
+    ports:
+      - "8042:8040"
+      - "9052:9050"
+    environment:
+      - BE_ADDR=be3:9050
+      - FDB_CLUSTER_FILE=/opt/doris/fdb/fdb.cluster
+    volumes:
+      - be3-data:/opt/doris/be/storage
+      - ./configs/be/be.conf:/opt/doris/be/conf/be.conf
+      - ./configs/fdb/fdb.cluster:/opt/doris/fdb/fdb.cluster
+    command: ["bash", "-c", "chmod +x /opt/doris/be/bin/start_be.sh && /opt/doris/be/bin/start_be.sh --daemon && tail -f /opt/doris/be/log/be.INFO"]
+    deploy:
+      resources:
+        limits:
+          memory: ${BE_MEMORY_LIMIT:-4g}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8040/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    depends_on:
+      fe1:
+        condition: service_healthy
+
+  # ========================================
+  # Monitoring (Optional)
+  # ========================================
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: doris-prometheus
+    hostname: prometheus
+    networks:
+      - doris-network
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - prometheus-data:/prometheus
+      - ./configs/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    profiles:
+      - monitoring
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: doris-grafana
+    hostname: grafana
+    networks:
+      - doris-network
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=grafana-clock-panel
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./configs/grafana/provisioning:/etc/grafana/provisioning
+    profiles:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      - prometheus
