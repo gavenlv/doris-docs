@@ -1,0 +1,36 @@
+# 构建配置文件
+# Build Configuration
+
+# 基础镜像配置
+base_images:
+  ubuntu: "ubuntu:22.04"
+  # 备选: ubuntu:24.04 (LTS)
+
+# Nexus 配置
+nexus:
+  url: "nexus.company.com"
+  port: 8082
+  repository: "doris"
+
+# Doris 版本
+doris:
+  version: "3.1.4"
+  download_url: "https://archive.apache.org/dist/doris"
+
+# FoundationDB 版本
+fdb:
+  version: "7.1.37"
+
+# 安全扫描配置
+security:
+  scanner: "trivy"
+  severity_threshold: "HIGH,CRITICAL"  # 阻断级别
+  ignore_unfixed: false  # 是否忽略无法修复的漏洞
+  skip_files: []  # 跳过扫描的文件
+  skip_dirs: []   # 跳过扫描的目录
+
+# 构建参数
+build:
+  no_cache: false
+  pull: true  # 总是拉取最新基础镜像
+  platform: "linux/amd64"

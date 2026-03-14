@@ -1,0 +1,18 @@
+# Doris GKE Cluster - 安全加固镜像列表
+# 格式: 镜像名称:标签
+
+# Doris Frontend
+nexus.company.com/doris/fe:3.1.4-secure
+
+# Doris Backend
+nexus.company.com/doris/be:3.1.4-secure
+
+# FoundationDB
+nexus.company.com/foundationdb:7.1.37-secure
+
+# Doris Operator
+nexus.company.com/doris-operator:v1.1.0-secure
+
+# 可选组件
+# nexus.company.com/prometheus:v2.45.0-secure
+# nexus.company.com/grafana:10.2.0-secure

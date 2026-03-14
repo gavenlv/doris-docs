@@ -1,0 +1,18 @@
+# 此目录用于存放安全扫描报告
+# 运行 scan-images.sh 后会自动生成以下文件:
+#
+# ├── json/                    # JSON 格式报告
+# │   ├── fe-scan.json
+# │   ├── be-scan.json
+# │   ├── fdb-scan.json
+# │   └── operator-scan.json
+# ├── html/                    # HTML 格式报告
+# │   ├── fe-scan.html
+# │   ├── be-scan.html
+# │   ├── fdb-scan.html
+# │   └── operator-scan.html
+# ├── fe-summary.txt           # FE 摘要
+# ├── be-summary.txt           # BE 摘要
+# ├── fdb-summary.txt          # FDB 摘要
+# ├── operator-summary.txt     # Operator 摘要
+# └── security-scan-report.txt # 总报告

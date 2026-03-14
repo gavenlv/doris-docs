@@ -1,0 +1,58 @@
+# ==========================================
+# Storage Classes for GKE
+# ==========================================
+
+# Standard SSD for hot data
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: pd-ssd
+  labels:
+    security: hardened
+provisioner: pd.csi.storage.gke.io
+parameters:
+  type: pd-ssd
+  replication-type: regional-pd
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+---
+# Standard HDD for logs and cold data
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: pd-standard
+  labels:
+    security: hardened
+provisioner: pd.csi.storage.gke.io
+parameters:
+  type: pd-standard
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+---
+# Local SSD for high performance storage
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: local-ssd
+  labels:
+    security: hardened
+provisioner: kubernetes.io/gce-pd
+parameters:
+  type: local-ssd
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Delete
+---
+# GCS FUSE for cold storage
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gcs-fuse
+  labels:
+    security: hardened
+provisioner: gcsfuse.csi.storage.gke.io
+parameters:
+  bucketName: doris-prod-cold-storage
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
