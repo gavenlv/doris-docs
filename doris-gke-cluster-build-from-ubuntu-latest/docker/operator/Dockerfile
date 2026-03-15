@@ -5,7 +5,7 @@
 # Version: v1.1.0
 # Purpose: 安全加固的 Doris Operator 镜像
 
-# 阶段 1: 构建阶段
+# 阶段 1: 构建阶段 (包含 Go 工具链)
 FROM golang:1.21-alpine AS builder
 
 ARG OPERATOR_VERSION=v1.1.0
@@ -14,13 +14,13 @@ ARG OPERATOR_REPO=https://github.com/apache/doris-operator
 # 安装构建依赖
 RUN apk add --no-cache git make
 
-# 克隆并构建
+# 克隆并构建 Operator
 WORKDIR /build
 RUN git clone --depth 1 --branch ${OPERATOR_VERSION} ${OPERATOR_REPO} . \
     && go mod download \
     && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /doris-operator ./cmd/operator
 
-# 阶段 2: 安全加固的运行时镜像
+# 阶段 2: 安全加固的运行时镜像 (无额外工具)
 FROM ubuntu:22.04
 
 LABEL maintainer="Doris Team"
@@ -35,7 +35,7 @@ ENV LC_ALL=C.UTF-8
 # 安全加固: 创建非 root 用户
 RUN groupadd -r doris-operator && useradd -r -g doris-operator -d /app -s /sbin/nologin doris-operator
 
-# 安装最小依赖
+# 仅安装运行时依赖 (无构建工具)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     tzdata \
@@ -44,7 +44,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# 复制二进制文件
+# 从构建阶段复制二进制文件
 COPY --from=builder /doris-operator /app/doris-operator
 
 # 设置权限
