@@ -139,11 +139,39 @@ doris-gke-cluster-build-from-ubuntu-latest/
 - GCP 项目访问权限
 - Nexus Registry 访问权限
 
-## 相关文档
+## 开始使用
 
-- [安全加固指南](docs/SECURITY-HARDENING.md)
-- [构建指南](docs/BUILD-GUIDE.md)
-- [离线构建指南](docs/OFFLINE-BUILD.md)
-- [本地验证指南](docs/LOCAL-VERIFY.md)
-- [漏洞修复记录](docs/VULNERABILITY-FIXES.md)
-- [部署指南](docs/DEPLOYMENT-GUIDE.md)
+### 方式 1: 一键验证 (推荐)
+
+**Windows 用户:**
+```powershell
+# 在项目根目录双击运行
+.\verify.bat
+```
+
+**Linux/macOS 用户:**
+```bash
+# 赋予执行权限并运行
+chmod +x scripts/*.sh
+./scripts/local-verify.sh all
+```
+
+### 方式 2: 手动验证
+
+参考 [本地验证指南](docs/LOCAL-VERIFY.md) 按步骤执行。
+
+### 方式 3: 生产部署
+
+参考 [部署指南](docs/DEPLOYMENT-GUIDE.md)。
+
+## 项目文档
+
+| 文档 | 说明 |
+|------|------|
+| [PROJECT-SUMMARY.md](PROJECT-SUMMARY.md) | 项目完整总结 |
+| [安全加固指南](docs/SECURITY-HARDENING.md) | 安全措施详解 |
+| [构建指南](docs/BUILD-GUIDE.md) | 镜像构建说明 |
+| [离线构建指南](docs/OFFLINE-BUILD.md) | 离线环境构建 |
+| [本地验证指南](docs/LOCAL-VERIFY.md) | 本地测试步骤 |
+| [漏洞修复记录](docs/VULNERABILITY-FIXES.md) | 漏洞处理记录 |
+| [部署指南](docs/DEPLOYMENT-GUIDE.md) | GKE 部署说明 |

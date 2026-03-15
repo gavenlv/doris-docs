@@ -2,7 +2,7 @@
 REM ==========================================
 REM Doris 安全镜像 - 本地验证脚本
 REM ==========================================
-REM 请保存为 verify.bat 并在项目根目录运行
+REM 使用方法: 在项目根目录双击运行
 
 setlocal enabledelayedexpansion
 
@@ -55,8 +55,8 @@ if not exist "%OFFLINE_DIR%\doris-fe\apache-doris-fe-%DORIS_VERSION%-bin.tar.gz"
 
 echo     检查 Doris BE 包...
 if not exist "%OFFLINE_DIR%\doris-be\apache-doris-be-%DORIS_VERSION%-bin-x86_64.tar.gz" (
-    echo     下载 Doris BE -Command "Invoke-WebRequest -Uri 'https://archive.apache.org/dist/doris/%DOR...
-    powershellIS_VERSION%/apache-doris-be-%DORIS_VERSION%-bin-x86_64.tar.gz' -OutFile '%OFFLINE_DIR%\doris-be\apache-doris-be-%DORIS_VERSION%-bin-x86_64.tar.gz'"
+    echo     下载 Doris BE...
+    powershell -Command "Invoke-WebRequest -Uri 'https://archive.apache.org/dist/doris/%DORIS_VERSION%/apache-doris-be-%DORIS_VERSION%-bin-x86_64.tar.gz' -OutFile '%OFFLINE_DIR%\doris-be\apache-doris-be-%DORIS_VERSION%-bin-x86_64.tar.gz'"
 ) else (
     echo     BE 包已存在
 )
