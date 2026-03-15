@@ -23,6 +23,8 @@
 
 ## 快速开始
 
+### 在线构建
+
 ```bash
 # 1. 构建并扫描镜像
 ./scripts/build-and-scan.sh all
@@ -39,6 +41,42 @@ cat reports/security-scan-report.txt
 # 5. 部署到 GKE
 ./scripts/deploy.sh
 ```
+
+### 离线构建（推荐）
+
+适用于构建环境无外网访问的场景：
+
+```bash
+# 1. 有网环境：下载离线包
+./scripts/prepare-offline.sh download
+
+# 2. 传输 offline-packages/ 到构建服务器
+
+# 3. 离线环境构建
+BUILD_MODE=local ./scripts/build-images.sh all
+
+# 4. 安全扫描
+./scripts/scan-images.sh all
+
+# 5. 部署
+./scripts/deploy.sh
+```
+
+详见: [离线构建指南](docs/OFFLINE-BUILD.md)
+
+### 本地验证
+
+在开发/测试环境中验证整个方案：
+
+```bash
+# Windows 用户
+.\verify.bat
+
+# Linux/macOS 用户
+./scripts/local-verify.sh all
+```
+
+详见: [本地验证指南](docs/LOCAL-VERIFY.md)
 
 ## 目录结构
 
@@ -61,6 +99,8 @@ doris-gke-cluster-build-from-ubuntu-latest/
 ├── docs/                     # 文档
 │   ├── SECURITY-HARDENING.md # 安全加固指南
 │   ├── BUILD-GUIDE.md        # 构建指南
+│   ├── OFFLINE-BUILD.md      # 离线构建指南
+│   ├── LOCAL-VERIFY.md       # 本地验证指南
 │   ├── VULNERABILITY-FIXES.md # 漏洞修复记录
 │   └── DEPLOYMENT-GUIDE.md   # 部署指南
 ├── configs/                  # 配置文件
@@ -103,5 +143,7 @@ doris-gke-cluster-build-from-ubuntu-latest/
 
 - [安全加固指南](docs/SECURITY-HARDENING.md)
 - [构建指南](docs/BUILD-GUIDE.md)
+- [离线构建指南](docs/OFFLINE-BUILD.md)
+- [本地验证指南](docs/LOCAL-VERIFY.md)
 - [漏洞修复记录](docs/VULNERABILITY-FIXES.md)
 - [部署指南](docs/DEPLOYMENT-GUIDE.md)

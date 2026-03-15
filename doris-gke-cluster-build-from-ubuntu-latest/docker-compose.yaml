@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  # Nexus3 私有仓库
+  nexus:
+    image: sonatype/nexus3:latest
+    container_name: doris-nexus
+    ports:
+      - "8081:8081"      # Nexus Web UI
+      - "8082:8082"      # Docker Hosted Repository
+    environment:
+      - INSTALL4J_ADD_VM_PARAMS=-Xmx1024m
+      # 允许 Docker 请求通过代理
+      - JAVA_OPTS=-Djava.net.preferIPv4Stack=true
+    volumes:
+      - nexus-data:/nexus-data
+    networks:
+      - doris-net
+
+  # 可选: 验证镜像可以运行的测试容器
+  test-fe:
+    image: doris-fe:3.1.4
+    container_name: doris-test-fe
+    command: ["sleep", "infinity"]
+    networks:
+      - doris-net
+    depends_on:
+      - nexus
+
+  test-be:
+    image: doris-be:3.1.4
+    container_name: doris-test-be
+    command: ["sleep", "infinity"]
+    networks:
+      - doris-net
+    depends_on:
+      - nexus
+
+volumes:
+  nexus-data:
+
+networks:
+  doris-net:
+    driver: bridge

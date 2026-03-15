@@ -5,39 +5,73 @@
 # Version: 7.1.37
 # Purpose: 安全加固的 FoundationDB 镜像
 
-# 阶段 1: 下载阶段 (构建工具)
+# ==========================================
+# 构建参数
+# ==========================================
+ARG FDB_VERSION=7.1.37
+ARG NEXUS_URL=nexus.company.com:8082
+ARG OFFLINE_PATH=/build-context/offline-packages
+
+# ==========================================
+# 阶段 1: 下载阶段
+# ==========================================
 FROM ubuntu:22.04 AS downloader
 
-ARG FDB_VERSION=7.1.37
-ARG FDB_WEBSITE=https://github.com/apple/foundationdb/releases/download
+ARG FDB_VERSION
+ARG NEXUS_URL
+ARG OFFLINE_PATH
 
-# 安装下载和安装工具 (仅用于构建)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
+    curl \
     dpkg-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# 下载 FoundationDB DEB 包
-WORKDIR /tmp/fdb
-RUN wget -q ${FDB_WEBSITE}/${FDB_VERSION}/foundationdb-clients_${FDB_VERSION}-1_amd64.deb \
-    && wget -q ${FDB_WEBSITE}/${FDB_VERSION}/foundationdb-server_${FDB_VERSION}-1_amd64.deb
+WORKDIR /tmp/downloads
 
-# 阶段 2: 安全加固的运行时镜像 (无额外工具)
+# 下载 FoundationDB
+COPY --chmod=755 <<'EOF' /tmp/download-fdb.sh
+#!/bin/bash
+set -e
+OFFLINE_PATH="${OFFLINE_PATH:-/build-context/offline-packages}"
+if [ -f "${OFFLINE_PATH}/foundationdb/foundationdb-clients_${FDB_VERSION}-1_amd64.deb" ]; then
+    cp "${OFFLINE_PATH}"/foundationdb/foundationdb-*_${FDB_VERSION}-1_amd64.deb ./
+elif [ -f "/offline-packages/foundationdb/foundationdb-clients_${FDB_VERSION}-1_amd64.deb" ]; then
+    cp /offline-packages/foundationdb/foundationdb-*_${FDB_VERSION}-1_amd64.deb ./
+else
+    echo "ERROR: Packages not found"
+    exit 1
+fi
+EOF
+
+RUN --mount=type=secret,id=nexus_env \
+    if [ -f /run/secrets/nexus_env ]; then \
+        source /run/secrets/nexus_env; \
+        curl -u "${NEXUS_USER}:${NEXUS_PASS}" \
+            "http://${NEXUS_URL}/repository/doris-packages/foundationdb-clients/${FDB_VERSION}/foundationdb-clients_${FDB_VERSION}-1_amd64.deb" \
+            -o "foundationdb-clients_${FDB_VERSION}-1_amd64.deb"; \
+        curl -u "${NEXUS_USER}:${NEXUS_PASS}" \
+            "http://${NEXUS_URL}/repository/doris-packages/foundationdb-server/${FDB_VERSION}/foundationdb-server_${FDB_VERSION}-1_amd64.deb" \
+            -o "foundationdb-server_${FDB_VERSION}-1_amd64.deb"; \
+    else \
+        /tmp/download-fdb.sh; \
+    fi || /tmp/download-fdb.sh
+
+# ==========================================
+# 阶段 2: 运行时镜像
+# ==========================================
 FROM ubuntu:22.04
 
 LABEL maintainer="Doris Team"
 LABEL version="7.1.37-secure"
 LABEL description="FoundationDB - Security Hardened Image"
 
-# 安全加固: 设置时区和语言
 ENV TZ=UTC
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 
-# 安全加固: 创建非 root 用户
 RUN groupadd -r fdb && useradd -r -g fdb -d /var/lib/foundationdb -s /sbin/nologin fdb
 
-# 安装运行时依赖 (无构建工具)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     tzdata \
@@ -47,34 +81,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# 从构建阶段复制 DEB 包并安装
-COPY --from=downloader /tmp/fdb/*.deb /tmp/
-RUN dpkg -i /tmp/foundationdb-clients_${FDB_VERSION}-1_amd64.deb \
-    && dpkg -i /tmp/foundationdb-server_${FDB_VERSION}-1_amd64.deb \
+# 从下载阶段复制并安装
+COPY --from=downloader /tmp/downloads/*.deb /tmp/fdb/
+RUN dpkg -i /tmp/fdb/foundationdb-clients_${FDB_VERSION}-1_amd64.deb \
+    && dpkg -i /tmp/fdb/foundationdb-server_${FDB_VERSION}-1_amd64.deb \
     || apt-get install -f -y \
-    && rm -rf /tmp/*.deb
+    && rm -rf /tmp/fdb
 
-# 创建目录并设置权限
-RUN mkdir -p /var/lib/foundationdb/data /var/log/foundationdb \
-    && chown -R fdb:fdb /var/lib/foundationdb /var/log/foundationdb \
-    && chmod 750 /var/lib/foundationdb /var/log/foundationdb
+RUN mkdir -p /var/lib/foundationdb/data /var/log/foundationdb && \
+    chown -R fdb:fdb /var/lib/foundationdb /var/log/foundationdb && \
+    chmod 750 /var/lib/foundationdb /var/log/foundationdb && \
+    chmod 640 /etc/foundationdb/foundationdb.conf
 
-# 设置配置文件权限
-RUN chmod 640 /etc/foundationdb/foundationdb.conf
-
-# 设置环境变量
 ENV FDB_CLUSTER_FILE=/etc/foundationdb/fdb.cluster
 
-# 使用非 root 用户
 USER fdb
 WORKDIR /var/lib/foundationdb
 
-# 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD fdbcli --exec "status" || exit 1
 
-# 暴露端口
 EXPOSE 4500
 
-# 启动命令
 CMD ["/usr/sbin/fdbserver", "--cluster-file", "/etc/foundationdb/fdb.cluster", "--public-address", "auto:4500"]
