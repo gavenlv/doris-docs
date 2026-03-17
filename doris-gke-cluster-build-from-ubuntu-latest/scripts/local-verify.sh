@@ -18,12 +18,12 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 NEXUS_URL="localhost:8082"
 NEXUS_UI_URL="localhost:8081"
 NEXUS_USER="admin"
-NEXUS_PASS="admin123"
+NEXUS_PASS="adminadmin"
 NEXUS_REPO_DOCKER="doris-docker"
 NEXUS_REPO_RAW="doris-packages"
 
 # 版本配置
-DORIS_VERSION="3.1.4"
+DORIS_VERSION="3.0.5"
 FDB_VERSION="7.1.37"
 
 # ==========================================
@@ -105,7 +105,7 @@ start_nexus() {
     sleep 10
     
     log_info "Nexus 已就绪: ${NEXUS_UI_URL}"
-    log_info "默认账号: admin / admin123"
+    log_info "默认账号: admin / adminadmin"
 }
 
 configure_nexus() {

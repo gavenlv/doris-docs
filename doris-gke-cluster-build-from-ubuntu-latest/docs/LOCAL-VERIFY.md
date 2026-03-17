@@ -206,7 +206,118 @@ docker run -it --rm doris-fe:3.1.4 /bin/bash
 docker run -it --rm doris-be:3.1.4 /bin/bash
 ```
 
-## 故障排查
+## Nexus 登录问题
+
+### 无法访问 http://localhost:8081
+
+**症状**: 浏览器无法打开 Nexus 登录页面
+
+**诊断步骤**:
+
+```powershell
+# Windows - 运行诊断脚本
+powershell -ExecutionPolicy Bypass -File scripts\fix-nexus.ps1
+
+# Linux/macOS - 运行诊断脚本
+./scripts/fix-nexus.sh
+```
+
+**常见原因和解决方案**:
+
+#### 原因 1: Nexus 仍在启动中
+
+Nexus 首次启动需要 1-2 分钟。
+
+```bash
+# 查看启动状态
+docker logs --tail 50 doris-nexus | grep -i "started"
+
+# 等待完全启动
+sleep 120
+```
+
+#### 原因 2: 忘记初始密码
+
+```bash
+# 获取初始密码
+docker exec doris-nexus cat /nexus-data/admin.password
+```
+
+输出示例:
+```
+8a7b6c5d-4e3f-2g1h-0i9j-8k7l6m5n4o3p
+```
+
+使用 `admin / 上面获取的密码` 登录。
+
+#### 原因 3: 使用正确的密码
+
+您提供的凭据：**admin / adminadmin**
+
+```bash
+# 使用您的凭据登录
+docker login localhost:8082 -u admin -p adminadmin
+
+# 或在浏览器中访问 http://localhost:8081
+# 用户名: admin
+# 密码: adminadmin
+```
+
+如果密码不正确，重置 admin 密码:
+```bash
+# 进入 Nexus 容器重置密码
+docker exec -it doris-nexus /bin/bash
+
+# 在容器内执行
+cd /opt/sonatype/nexus/bin
+./nexus reset-admin-password
+# 按提示设置新密码
+```
+
+#### 原因 4: 端口冲突
+
+```bash
+# 检查端口占用
+netstat -ano | grep 8081
+
+# 如果端口被占用，使用其他端口
+docker rm -f doris-nexus
+docker run -d --name doris-nexus -p 8091:8081 -p 8092:8082 sonatype/nexus3:latest
+
+# 然后访问 http://localhost:8091
+```
+
+#### 原因 5: 容器未正常运行
+
+```bash
+# 完全重置 Nexus
+docker rm -f doris-nexus
+docker volume prune -f
+docker run -d --name doris-nexus -p 8081:8081 -p 8082:8082 sonatype/nexus3:latest
+
+# 等待 2 分钟
+sleep 120
+```
+
+### 跳过 Nexus 验证
+
+如果 Nexus 问题暂时无法解决，可以先验证镜像构建:
+
+**Windows:**
+```powershell
+.\verify-simple.bat
+```
+
+**Linux/macOS:**
+```bash
+# 仅构建镜像
+./scripts/build-images.sh all
+
+# 扫描镜像
+./scripts/scan-images.sh all
+```
+
+## 其他故障排查
 
 ### 问题 1: Docker 连接失败
 

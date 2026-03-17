@@ -2,111 +2,100 @@
 # Doris Backend - Security Hardened Image
 # ==========================================
 # Base: Ubuntu 22.04 LTS
-# Version: 3.1.4
-# Purpose: 从源码构建安全加固的 Doris BE 镜像
+# Version: 3.0.5
+# Package Format: apache-doris-3.0.5-bin-x64.tar.gz (unified package containing both fe/ and be/)
+# Purpose: Build security-hardened Doris BE image from unified binary package
+# Note: Doris 3.x uses unified package format: apache-doris-{VERSION}-bin-x64.tar.gz
 
 # ==========================================
-# 构建参数
+# Build Arguments
 # ==========================================
-ARG DORIS_VERSION=3.1.4
-ARG DOWNLOAD_SOURCE=local
-ARG NEXUS_URL=nexus.company.com:8082
-ARG GCS_BUCKET=gs://doris-build-packages
+ARG DORIS_VERSION=3.0.5
 ARG OFFLINE_PATH=/build-context/offline-packages
 
 # ==========================================
-# 阶段 1: 下载阶段
+# Stage 1: Download and Extract
 # ==========================================
 FROM ubuntu:22.04 AS downloader
 
 ARG DORIS_VERSION
-ARG DOWNLOAD_SOURCE
-ARG NEXUS_URL
 ARG OFFLINE_PATH
 
+# Install extraction tools only
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    wget \
     tar \
     gzip \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /tmp/downloads
 
-# 下载 Doris BE
-COPY --chmod=755 <<'EOF' /tmp/download.sh
-#!/bin/bash
-set -e
-OFFLINE_PATH="${OFFLINE_PATH:-/build-context/offline-packages}"
-if [ -f "${OFFLINE_PATH}/doris-be/apache-doris-be-${DORIS_VERSION}-bin-x86_64.tar.gz" ]; then
-    cp "${OFFLINE_PATH}/doris-be/apache-doris-be-${DORIS_VERSION}-bin-x86_64.tar.gz" ./
-elif [ -f "/offline-packages/doris-be/apache-doris-be-${DORIS_VERSION}-bin-x86_64.tar.gz" ]; then
-    cp "/offline-packages/doris-be/apache-doris-be-${DORIS_VERSION}-bin-x86_64.tar.gz" ./
-else
-    echo "ERROR: Package not found"
-    exit 1
-fi
-EOF
+# Copy and extract Doris unified package
+COPY ${OFFLINE_PATH}/apache-doris-${DORIS_VERSION}-bin-x64.tar.gz /tmp/
 
-# 从 Nexus 下载 (需要 --secret 传递凭据)
-RUN --mount=type=secret,id=nexus_env \
-    if [ -f /run/secrets/nexus_env ]; then \
-        source /run/secrets/nexus_env; \
-        curl -u "${NEXUS_USER}:${NEXUS_PASS}" \
-            "http://${NEXUS_URL}/repository/doris-packages/doris-be/${DORIS_VERSION}/apache-doris-be-${DORIS_VERSION}-bin-x86_64.tar.gz" \
-            -o "apache-doris-be-${DORIS_VERSION}-bin-x86_64.tar.gz"; \
-    else \
-        /tmp/download.sh; \
-    fi || /tmp/download.sh
+RUN tar -xzf /tmp/apache-doris-${DORIS_VERSION}-bin-x64.tar.gz && \
+    mv apache-doris-${DORIS_VERSION}-bin-x64 /doris-package && \
+    ls -la /doris-package/
 
-# 解压
-RUN tar -xzf apache-doris-be-${DORIS_VERSION}-bin-x86_64.tar.gz && \
-    mv apache-doris-be-${DORIS_VERSION}-bin-x86_64 /doris-be && \
-    rm -f apache-doris-be-${DORIS_VERSION}-bin-x86_64.tar.gz
+# Verify BE exists in the package
+RUN if [ ! -d "/doris-package/be" ]; then \
+        echo "ERROR: BE directory not found in unified package"; \
+        ls -la /doris-package/; \
+        exit 1; \
+    fi
 
 # ==========================================
-# 阶段 2: 运行时镜像
+# Stage 2: Runtime Image (No extra tools)
 # ==========================================
 FROM ubuntu:22.04
 
 LABEL maintainer="Doris Team"
-LABEL version="3.1.4-secure"
+LABEL version="3.0.5-secure"
 LABEL description="Doris Backend - Security Hardened Image"
 
 ENV TZ=UTC
 ENV LANG=C.UTF-8
-ENV LC_ALL=C.UTF-0
+ENV LC_ALL=C.UTF-8
 
+# Security: Create non-root user
 RUN groupadd -r doris && useradd -r -g doris -d /opt/doris -s /sbin/nologin doris
 
+# Install only runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libstdc++6 \
     tzdata \
+    curl \
     && apt-get upgrade -y \
     && apt-get autoremove -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-COPY --from=downloader /doris-be /opt/doris/be
+# Copy BE from unified package
+COPY --from=downloader /doris-package/be /opt/doris/be
 
+# Create required directories
 RUN mkdir -p /opt/doris/be/log /opt/doris/be/storage && \
     chown -R doris:doris /opt/doris
 
+# Security: Set file permissions
 RUN chmod -R 750 /opt/doris/be && \
     find /opt/doris/be -type f -exec chmod 640 {} \; && \
     find /opt/doris/be/bin -type f -exec chmod 750 {} \;
 
-RUN rm -rf /opt/doris/be/*.md /opt/doris/be/NOTICE /opt/doris/be/LICENSE
+# Remove unnecessary files
+RUN rm -rf /opt/doris/be/*.md /opt/doris/be/NOTICE /opt/doris/be/LICENSE 2>/dev/null || true
 
 ENV DORIS_HOME=/opt/doris/be
 ENV PATH=$DORIS_HOME/bin:$PATH
 
+# Use non-root user
 USER doris
 WORKDIR /opt/doris/be
 
+# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8040/api/health || exit 1
 
+# Expose ports
 EXPOSE 8040 9050 8060 9060
 
 ENTRYPOINT ["/opt/doris/be/bin/start_be.sh"]

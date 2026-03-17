@@ -38,7 +38,7 @@ if (-not (Test-Path "$offlineDir\doris-fe")) { New-Item -ItemType Directory -Pat
 if (-not (Test-Path "$offlineDir\doris-be")) { New-Item -ItemType Directory -Path "$offlineDir\doris-be" -Force | Out-Null }
 if (-not (Test-Path "$offlineDir\foundationdb")) { New-Item -ItemType Directory -Path "$offlineDir\foundationdb" -Force | Out-Null }
 
-$DORIS_VERSION = "3.1.4"
+$DORIS_VERSION = "3.0.5"
 $FDB_VERSION = "7.1.37"
 
 Write-Host "    下载 Doris FE..."
@@ -76,7 +76,7 @@ docker images | Select-String "doris-"
 # 4. 推送到 Nexus
 Write-Host ""
 Write-Host "[步骤4] 推送到 Nexus..." -ForegroundColor Yellow
-docker login localhost:8082 -u admin -p admin123
+docker login localhost:8082 -u admin -p adminadmin
 docker tag "doris-fe:$DORIS_VERSION" "localhost:8082/doris/fe:$DORIS_VERSION-secure"
 docker tag "doris-be:$DORIS_VERSION" "localhost:8082/doris/be:$DORIS_VERSION-secure"
 docker push "localhost:8082/doris/fe:$DORIS_VERSION-secure"

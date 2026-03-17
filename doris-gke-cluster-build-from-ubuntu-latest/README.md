@@ -4,6 +4,16 @@
 
 本方案从 Ubuntu 基础镜像构建 Doris 组件镜像，集成安全扫描和漏洞修复流程，确保部署的镜像不含已知安全漏洞。
 
+## 重要说明：Doris 3.x 包格式变更
+
+Doris 3.x 版本使用**统一二进制包格式**：
+- **文件名**: `apache-doris-{VERSION}-bin-x64.tar.gz`
+- **包含内容**: 同时包含 `fe/` 和 `be/` 目录
+- **下载地址**: 阿里云 OSS (官方镜像)
+- **本方案版本**: 3.0.5 (稳定版，有现成二进制包)
+
+> ⚠️ **注意**: Doris 3.1.4 在 Apache 归档中只有源码包，没有二进制包。因此本方案使用 3.0.5 版本。
+
 ## 与标准方案的区别
 
 | 特性 | 标准方案 | 安全加固方案 |
@@ -154,6 +164,24 @@ doris-gke-cluster-build-from-ubuntu-latest/
 # 赋予执行权限并运行
 chmod +x scripts/*.sh
 ./scripts/local-verify.sh all
+```
+
+### 如果 Nexus 登录失败
+
+**方案 A: 修复 Nexus (PowerShell)**
+```powershell
+# 运行诊断修复脚本
+powershell -ExecutionPolicy Bypass -File scripts\fix-nexus.ps1
+```
+
+**方案 B: 跳过 Nexus，仅验证镜像构建**
+```powershell
+# Windows 简化验证 (无需 Nexus)
+.\verify-simple.bat
+
+# Linux/macOS 简化验证
+./scripts/build-images.sh all
+./scripts/scan-images.sh all
 ```
 
 ### 方式 2: 手动验证

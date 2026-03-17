@@ -14,4 +14,4 @@ image_naming:
   suffix: "-secure"  # 安全加固镜像后缀
   
 # 示例:
-# nexus.company.com:8082/doris/fe:3.1.4-secure
+# nexus.company.com:8082/doris/fe:3.0.5-secure
