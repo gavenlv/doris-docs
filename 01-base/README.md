@@ -6,17 +6,19 @@
 
 ```
 01-base/
-├── README.md              # 本文件
-├── 01-connect.md          # 连接 Doris
-├── 02-database-table.md   # 数据库和表管理
-├── 03-crud.md             # 增删改查操作
-├── 04-data-import.md      # 数据导入
-├── 05-data-export.md      # 数据导出
-├── 06-partition.md        # 分区管理
-├── 07-index.md            # 索引管理
-├── 08-join.md             # JOIN 操作
-├── 09-aggregation.md      # 聚合函数
-└── 10-advanced.md         # 高级功能
+├── README.md                    # 本文件
+├── 01-connect.md                # 连接 Doris
+├── 02-database-table.md         # 数据库和表管理
+├── 03-crud.md                   # 增删改查操作
+├── 04-data-import.md            # 数据导入
+├── 05-data-export.md            # 数据导出
+├── 06-partition.md              # 分区管理
+├── 07-index.md                  # 索引管理
+├── 08-join.md                   # JOIN 操作
+├── 09-aggregation.md            # 聚合函数
+├── 10-advanced.md               # 高级功能
+├── 11-data-engineer-guide.md    # 数据工程师完整指南 ⭐
+└── 12-operations-guide.md       # 系统运维专家指南 ⭐
 ```
 
 ## 前置要求
@@ -39,6 +41,8 @@ docker exec -it doris-fe mysql -h 127.0.0.1 -P 9030 -u root
 
 ## 学习路径
 
+### 基础教程
+
 1. [连接 Doris](./01-connect.md) - 学习如何连接 Doris 集群
 2. [数据库和表管理](./02-database-table.md) - 创建和管理数据库、表
 3. [增删改查操作](./03-crud.md) - 基本的 CRUD 操作
@@ -49,6 +53,11 @@ docker exec -it doris-fe mysql -h 127.0.0.1 -P 9030 -u root
 8. [JOIN 操作](./08-join.md) - 多表关联查询
 9. [聚合函数](./09-aggregation.md) - 聚合和分组
 10. [高级功能](./10-advanced.md) - 物化视图、动态分区等
+
+### 完整指南
+
+- [数据工程师完整指南](./11-data-engineer-guide.md) - 从入门到生产的数据工程实践
+- [系统运维专家指南](./12-operations-guide.md) - 部署、监控、故障排除、性能调优
 
 ## 示例数据
 
