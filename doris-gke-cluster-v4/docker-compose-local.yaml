@@ -1,0 +1,94 @@
+# ==========================================
+# Doris 4.0.2 Local Development Docker Compose
+# ==========================================
+# Using pre-built images from registry
+# Usage: docker-compose -f docker-compose-local.yaml up -d
+
+version: '3.8'
+
+services:
+  # ==========================================
+  # Doris Frontend (FE)
+  # ==========================================
+  doris-fe:
+    image: zlsmshoqvwt6q1.xuanyuan.run/apache/doris:fe-4.0.2
+    container_name: doris-local-fe
+    hostname: doris-fe
+    ports:
+      - "8030:8030"    # FE Web UI
+      - "9010:9010"    # FE RPC
+      - "9020:9020"    # FE Thrift
+      - "9030:9030"    # MySQL Client
+    environment:
+      - FE_SERVERS=fe1:127.0.0.1:9010
+      - FE_ID=1
+    volumes:
+      - fe-data:/opt/doris/fe/doris-meta
+      - fe-log:/opt/doris/fe/log
+    networks:
+      - doris-local-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8030/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ==========================================
+  # Doris Backend (BE)
+  # ==========================================
+  doris-be:
+    image: zlsmshoqvwt6q1.xuanyuan.run/apache/doris:be-4.0.2
+    container_name: doris-local-be
+    hostname: doris-be
+    ports:
+      - "8040:8040"    # BE Web UI
+      - "9050:9050"    # BE RPC
+      - "8060:8060"    # BE BRPC
+    environment:
+      - BE_PORT=9050
+      - BE_HEARTBEAT_PORT=9050
+      - BE_WEBSERVER_PORT=8040
+      - BE_BRPC_PORT=8060
+      - FE_HOSTS=doris-fe:9030
+      - BE_NAME=doris-be-1
+    volumes:
+      - be-data:/opt/doris/be/storage
+      - be-log:/opt/doris/be/log
+    networks:
+      - doris-local-net
+    depends_on:
+      doris-fe:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8040/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  # ==========================================
+  # Doris Local Validator (for connection testing)
+  # ==========================================
+  doris-validator:
+    image: mysql:8.0
+    container_name: doris-validator
+    environment:
+      - MYSQL_ALLOW_EMPTY_PASSWORD=yes
+    command: ["sleep", "infinity"]
+    networks:
+      - doris-local-net
+
+volumes:
+  fe-data:
+    driver: local
+  fe-log:
+    driver: local
+  be-data:
+    driver: local
+  be-log:
+    driver: local
+
+networks:
+  doris-local-net:
+    driver: bridge

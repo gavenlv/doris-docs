@@ -1,0 +1,37 @@
+# Nexus Repository Configuration
+# Doris Version: 2.1.7
+
+nexus:
+  host: "nexus.company.com"
+  port: 8082
+
+  # Repository names
+  repositories:
+    docker: "doris-docker"
+    docker-hosted: "doris-docker-hosted"
+
+  # Image tags
+  tags:
+    fe: "nexus.company.com:8082/doris/fe:2.1.7-secure"
+    be: "nexus.company.com:8082/doris/be:2.1.7-secure"
+
+  # Authentication
+  auth:
+    username: "admin"
+    # Use environment variable for password in production
+    password: "${NEXUS_PASSWORD:-adminadmin}"
+
+# Doris Cluster Configuration
+doris:
+  version: "2.1.7"
+  fe:
+    replicas: 3
+    resources:
+      cpu: "4"
+      memory: "8Gi"
+  be:
+    replicas: 6
+    resources:
+      cpu: "8"
+      memory: "32Gi"
+      storage: "100Gi"

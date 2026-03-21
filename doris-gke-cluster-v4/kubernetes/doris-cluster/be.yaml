@@ -1,0 +1,110 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: doris-be
+  namespace: doris
+  labels:
+    app: doris
+    component: be
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8040
+      name: be-http
+    - port: 9050
+      name: be-heartbeat
+    - port: 8060
+      name: be-arrow-flight
+  selector:
+    app: doris
+    component: be
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: doris-be
+  namespace: doris
+  labels:
+    app: doris
+    component: be
+spec:
+  replicas: 6
+  selector:
+    matchLabels:
+      app: doris
+      component: be
+  template:
+    metadata:
+      labels:
+        app: doris
+        component: be
+    spec:
+      imagePullSecrets:
+        - name: nexus-secret
+      initContainers:
+        - name: fix-permissions
+          image: busybox:latest
+          command: ["sh", "-c", "chown -R 1000:1000 /opt/doris"]
+          volumeMounts:
+            - name: data
+              mountPath: /opt/doris
+            - name: be-tmp
+              mountPath: /opt/doris/tmp
+      containers:
+        - name: be
+          image: nexus.company.com:8082/doris/be:2.1.7-secure
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8040
+              name: be-http
+            - containerPort: 9050
+              name: be-heartbeat
+            - containerPort: 8060
+              name: be-arrow-flight
+          env:
+            - name: BE_ADDR
+              value: "0.0.0.0:9050"
+            - name: FE_HOST
+              value: "doris-fe.doris.svc.cluster.local"
+            - name: FE_PORT
+              value: "9030"
+          resources:
+            requests:
+              cpu: "8"
+              memory: "32Gi"
+            limits:
+              cpu: "16"
+              memory: "64Gi"
+          volumeMounts:
+            - name: data
+              mountPath: /opt/doris/be/storage
+            - name: be-tmp
+              mountPath: /opt/doris/tmp
+            - name: log
+              mountPath: /opt/doris/be/log
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 8040
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8040
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8040
+            initialDelaySeconds: 60
+            periodSeconds: 30
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: be-tmp
+          emptyDir: {}
+        - name: log
+          emptyDir: {}

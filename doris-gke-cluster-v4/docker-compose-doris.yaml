@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  fe:
+    image: apache/doris:fe-3.1.4
+    container_name: doris-fe
+    hostname: fe
+    environment:
+      - FE_SERVERS=fe1:127.0.0.1:9010
+    ports:
+      - "8030:8030"
+      - "9030:9030"
+    volumes:
+      - fe_data:/opt/doris/fe/doris-meta
+      - fe_log:/opt/doris/fe/log
+    healthcheck:
+      test: ["CMD", "bash", "-c", "curl -s http://127.0.0.1:8030/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  be:
+    image: apache/doris:be-3.1.4
+    container_name: doris-be
+    hostname: be
+    environment:
+      - BE_ADDR=127.0.0.1:9050
+      - FE_HOST=127.0.0.1
+      - FE_PORT=9030
+    ports:
+      - "8040:8040"
+      - "9050:9050"
+      - "8060:8060"
+    volumes:
+      - be_data:/opt/doris/be/storage
+      - be_tmp:/opt/doris/tmp
+      - be_log:/opt/doris/be/log
+    depends_on:
+      fe:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "curl -s http://127.0.0.1:8040/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+volumes:
+  fe_data:
+  fe_log:
+  be_data:
+  be_tmp:
+  be_log:

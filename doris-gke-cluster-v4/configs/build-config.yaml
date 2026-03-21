@@ -1,0 +1,39 @@
+# Doris Build Configuration
+# Version: 2.1.7
+
+doris:
+  version: "2.1.7"
+  # Doris 2.x uses unified binary package format
+  # Download from Alibaba Cloud OSS (official mirror)
+  download_url: "https://apache-doris-releases.oss-accelerate.aliyuncs.com"
+
+build:
+  # Base image for FE/BE
+  base_image: "ubuntu:22.04"
+
+  # Build arguments
+  args:
+    DORIS_VERSION: "2.1.7"
+    JAVA_VERSION: "11"
+
+  # Security settings
+  security:
+    # Run as non-root user
+    run_as_non_root: true
+    # Minimal packages only
+    minimal_base: true
+    # Enable Trivy scanning
+    scan_enabled: true
+
+# Image naming
+images:
+  fe: "doris-fe"
+  be: "doris-be"
+  fdb: "foundationdb"
+
+# Registry settings
+registry:
+  # Local registry for testing
+  local: "localhost:5000"
+  # Remote registry (Nexus)
+  remote: "nexus.company.com:8082"

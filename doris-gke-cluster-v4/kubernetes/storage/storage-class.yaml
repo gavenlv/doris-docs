@@ -1,0 +1,38 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: doris-storage
+  namespace: doris
+provisioner: pd.csi.storage.gke.io
+parameters:
+  type: pd-standard
+  replication-type: regional-pd
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+reclaimPolicy: Retain
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: doris-fe-meta
+  namespace: doris
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: doris-storage
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: doris-be-storage
+  namespace: doris
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: doris-storage
+  resources:
+    requests:
+      storage: 500Gi

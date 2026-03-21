@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: doris
+  labels:
+    name: doris
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: nexus-secret
+  namespace: doris
+type: kubernetes.io/dockerconfigjson
+data:
+  # Base64 encoded: {"auths":{"nexus.company.com:8082":{"username":"admin","password":"adminadmin","auth":"YWRtaW46YWRtaW5hZG1pbg=="}}}
+  .dockerconfigjson: eyJhdXRocyI6eyJueHV4LmNvbXBhbnkuY29tOjgwODIiOnsidXNlcm5hbWUiOiJhZG1pbiIsInBhc3N3b3JkIjoiYWRtaW5hZG1pbiIsImF1dGgiOiJZMTl0Y21GMGNTMXZjbU14WldNNmN5NXNhVzVwY21GMGFXOXVjeTgrIn19fQ==
