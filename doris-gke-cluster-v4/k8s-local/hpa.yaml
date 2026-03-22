@@ -1,0 +1,225 @@
+# =============================================================================
+# Horizontal Pod Autoscaler (HPA) - 自动扩缩容配置
+# =============================================================================
+#
+# 什么是 HPA？
+# - Kubernetes 内置的自动扩缩容机制
+# - 根据资源利用率自动调整 Pod 副本数
+# - 支持基于 CPU、内存指标
+#
+# 为什么需要 HPA？
+# - 传统静态资源配置无法应对负载变化
+# - 高峰期自动扩容保证性能
+# - 低峰期自动缩容降低成本
+# - 提高资源利用率
+#
+# HPA 工作原理：
+# 1. HPA Controller 定期检查指标（默认 15 秒）
+# 2. 计算当前副本数是否满足目标利用率
+# 3. 如果不满足，触发扩缩容
+# 4. StatefulSet 更新副本数
+#
+# 前置条件：
+# - 需要 metrics-server 在 Kubernetes 中运行
+# - kubectl top 命令能获取到 Pod 资源使用情况
+#
+# 注意事项：
+# - Doris 不建议频繁扩缩容（数据重分布开销大）
+# - 开发环境使用 emptyDir 存储，扩缩容不会丢失数据
+# - 生产环境建议设置保守的扩缩容策略
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# FE HPA 配置 - Frontend 自动扩缩容
+# -----------------------------------------------------------------------------
+# FE 扩缩容特点：
+# - FE 主要处理 SQL 解析、查询协调、元数据管理
+# - 资源需求相对稳定，主要受并发连接数影响
+# - 建议设置较小的扩缩容范围
+# - 开发环境：1-3 副本，生产环境：3-10 副本
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: doris-fe-hpa
+  namespace: doris
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/component: fe
+    app.kubernetes.io/part-of: doriscluster-local
+spec:
+  # scaleTargetRef: 要扩缩容的目标资源
+  # 说明: 指向 Doris Operator 创建的 FE Deployment
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: doriscluster-local-fe
+
+  # minReplicas: 最小副本数
+  # - 开发环境：1（节省资源）
+  # - 生产环境：不能小于 3（高可用需要）
+  minReplicas: 1
+
+  # maxReplicas: 最大副本数
+  # - 防止过度扩容
+  # - 需要考虑节点资源上限
+  maxReplicas: 3
+
+  # metrics: 扩缩容指标
+  # 说明: 支持多种指标组合，任一指标达标即触发扩容
+  metrics:
+    # CPU 利用率指标
+    # - type: Resource 表示使用 Kubernetes 资源指标
+    # - target.averageUtilization: 目标平均利用率
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          # Utilization: 平均利用率
+          # - 所有 Pod 的平均 CPU 利用率
+          # - 70% 表示 CPU 平均使用 70% 时扩容
+          # - 低于此值一段时间后会缩容
+          type: Utilization
+          averageUtilization: 70
+
+    # 内存利用率指标
+    # - 内存波动通常比 CPU 频繁，设置稍高阈值
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+  # behavior: 扩缩容行为配置
+  # 说明: 精细控制扩容和缩容的速度和策略
+  behavior:
+    # scaleDown: 缩容配置
+    scaleDown:
+      # stabilizationWindowSeconds: 稳定窗口时间
+      # - 缩容前等待的时间，防止抖动
+      # - 300 秒 = 5 分钟
+      # - 设置较长防止频繁缩容
+      stabilizationWindowSeconds: 300
+
+      policies:
+        # 每次缩容最多减少 1 个 Pod
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+
+    # scaleUp: 扩容配置
+    scaleUp:
+      # 扩容不需要等待，立即响应
+      stabilizationWindowSeconds: 0
+
+      policies:
+        # 每次扩容最多增加 1 个 Pod
+        - type: Pods
+          value: 1
+          periodSeconds: 15
+
+# -----------------------------------------------------------------------------
+# BE HPA 配置 - Backend 自动扩缩容
+# -----------------------------------------------------------------------------
+# BE 扩缩容特点：
+# - BE 是数据存储和查询执行节点
+# - 扩缩容涉及数据重分布（开销较大）
+# - 开发环境：1-3 副本，生产环境：3-20 副本
+# - 建议：
+#   * 扩容可以相对积极
+#   * 缩容要保守（避免数据丢失）
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: doris-be-hpa
+  namespace: doris
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/component: be
+    app.kubernetes.io/part-of: doriscluster-local
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: doriscluster-local-be
+
+  minReplicas: 1
+  maxReplicas: 3
+
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+  behavior:
+    scaleDown:
+      # 缩容更保守，等待更长时间
+      stabilizationWindowSeconds: 300
+      policies:
+        # 每次缩容最多 1 个 Pod
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        # 每次扩容最多增加 1 个 Pod
+        - type: Pods
+          value: 1
+          periodSeconds: 15
+
+# =============================================================================
+# HPA 配置参考指南
+# =============================================================================
+#
+# 扩容触发条件：
+# - CPU > 70% 持续一段时间
+# - 内存 > 80% 持续一段时间
+#
+# 缩容触发条件：
+# - CPU < 50% 持续 5 分钟（70% * 5分钟稳定窗口）
+# - 内存 < 60% 持续 5 分钟
+#
+# 扩容速度：
+# - 默认：每 15 秒最多增加 1 个 Pod
+# - 可通过 periodSeconds 调整
+#
+# 缩容速度：
+# - 默认：每 60 秒最多减少 1 个 Pod
+# - 保守策略防止震荡
+#
+# 开发环境 vs 生产环境：
+#
+# | 配置项     | 开发环境 | 生产环境 |
+# |-----------|---------|---------|
+# | FE min    | 1       | 3       |
+# | FE max    | 3       | 10      |
+# | BE min    | 1       | 3       |
+# | BE max    | 3       | 20      |
+# | 缩容冷却  | 5分钟    | 15分钟   |
+#
+# 查看 HPA 状态：
+#   kubectl get hpa -n doris
+#   kubectl describe hpa doris-fe-hpa -n doris
+#
+# 查看 HPA 指标：
+#   kubectl get hpa -n doris -o wide
+#   kubectl top pods -n doris
+#
+# 故障排查：
+# - HPA 无法获取指标：检查 metrics-server 是否运行
+# - Pod 无法扩容：检查资源配额和节点资源
+# =============================================================================

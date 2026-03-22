@@ -1,4 +1,39 @@
-# FE 配置
+# =============================================================================
+# ConfigMap 配置 - FE/BE 配置文件
+# =============================================================================
+#
+# 什么是 ConfigMap？
+# - Kubernetes 用于存储非敏感配置的资源
+# - 以键值对形式存储配置
+# - 可以作为文件挂载到容器中
+#
+# ConfigMap 用途：
+# - 存储配置文件（fe.conf、be.conf）
+# - 存储环境变量
+# - 存储命令行参数
+#
+# 为什么使用 ConfigMap？
+# - 配置与镜像分离，方便修改
+# - 不同环境使用不同配置
+# - 无需重新构建镜像即可修改配置
+#
+# 注意事项：
+# - ConfigMap 是非加密的，敏感信息使用 Secret
+# - ConfigMap 挂载为只读文件，无法在运行时修改
+# - 如果配置需要运行时修改，考虑使用环境变量
+#
+# 本文件包含：
+# 1. FE 配置 (fe-config) - Frontend 配置文件
+# 2. BE 配置 (be-config) - Backend 配置文件
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# FE ConfigMap - Frontend 配置
+# -----------------------------------------------------------------------------
+# 说明: 存储 FE 的配置文件 fe.conf
+# 挂载方式: 容器内 /etc/doris/fe.conf
+# 注意: FE 镜像内置配置可写，此 ConfigMap 仅作为参考
+
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -7,8 +42,130 @@ metadata:
   labels:
     app.kubernetes.io/name: doris
     app.kubernetes.io/component: fe
+    app.kubernetes.io/part-of: doriscluster-local
 data:
+  # 配置文件内容
+  # 说明: FE 配置项
+  #
+  # 常用配置项说明:
+  # - meta_dir: 元数据存储目录
+  # - enable_fqdn_mode: 启用 FQDN 模式（生产推荐）
+  # - log_level: 日志级别 (INFO/WARN/ERROR)
+  # - query_port: MySQL 连接端口
+  # - http_port: Web UI 端口
+  # - rpc_port: RPC 通信端口
+  # - edit_log_port: FE-FE 通信端口
+  #
+  # 重要配置:
+  # - priority_networks: 指定使用哪个网络 (格式: 10.0.0.0/8)
+  # - max_connections: 最大连接数
+  # - exec_memory_limit: 查询内存限制
+  #
+  # 注意:
+  # - 不要添加 entrypoint 会自动修改的配置
+  # - 例如 enable_fqdn_mode 由入口脚本自动添加
+  # - 此 ConfigMap 仅包含必要的自定义配置
   fe.conf: |
-    # FE 最小配置 - 不要在此添加 entrypoint 会自动修改的配置
+    # FE 元数据目录
+    # 说明: 存储 Doris 元数据（表结构、用户信息等）
+    # 重要: 元数据丢失会导致集群无法恢复
     meta_dir: /opt/doris/fe/doris-meta
+
+    # 日志级别
+    # 可选值: INFO, WARN, ERROR, FATAL
+    # 生产环境建议: WARN 或 ERROR
     log_level: INFO
+
+# -----------------------------------------------------------------------------
+# BE ConfigMap - Backend 配置
+# -----------------------------------------------------------------------------
+# 说明: 存储 BE 的配置文件 be.conf
+# 挂载方式: 容器内 /etc/doris/be/be.conf
+# 注意: 此 ConfigMap 被 doriscluster.yaml 引用
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: be-config
+  namespace: doris
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/component: be
+    app.kubernetes.io/part-of: doriscluster-local
+data:
+  # 配置文件内容
+  # 说明: BE 配置项
+  #
+  # 常用配置项说明:
+  # - storage_root_path: 数据存储路径
+  # - be_port: BE 监听端口
+  # - webserver_port: Web UI 端口
+  # - heartbeat_service_port: 心跳端口
+  # - brpc_port: RPC 端口
+  # - priority_networks: 指定使用哪个网络
+  #
+  # 存储配置 (storage_root_path):
+  # - 格式: <path>;<capacity>
+  # - 示例: /opt/doris/be/storage;1000
+  # - 多路径: /data1/doris/storage;1000;/data2/doris/storage;2000
+  #
+  # 注意:
+  # - 使用 emptyDir 存储时，路径应为 /dev/shm (内存文件系统)
+  # - 内存文件系统可提高 I/O 性能
+  be.conf: |
+    # BE 存储路径
+    # 说明: 存储数据文件和查询中间结果
+    # 注意: 开发环境使用 /dev/shm (内存存储)
+    storage_root_path: /dev/shm
+
+    # 心跳端口
+    # 说明: BE 通过此端口向 FE 发送心跳
+    heartbeat_service_port: 9050
+
+    # Web 服务端口
+    # 说明: BE 的 Web UI 和监控接口
+    webserver_port: 8040
+
+    # BRPC 端口
+    # 说明: BE-BE 之间 RPC 通信端口
+    brpc_port: 8060
+
+    # 日志级别
+    log_level: INFO
+
+# =============================================================================
+# 配置参考
+# =============================================================================
+#
+# FE 完整配置示例:
+#   meta_dir: /opt/doris/fe/doris-meta
+#   enable_fqdn_mode: true
+#   enable_token: false
+#   priority_networks: 192.168.0.0/16
+#   log_level: INFO
+#   max_connections: 4096
+#   query_port: 9030
+#   http_port: 8030
+#   rpc_port: 9020
+#   edit_log_port: 9010
+#
+# BE 完整配置示例:
+#   storage_root_path: /opt/doris/be/storage
+#   priority_networks: 192.168.0.0/16
+#   be_port: 9060
+#   webserver_port: 8040
+#   heartbeat_service_port: 9050
+#   brpc_port: 8060
+#   log_level: INFO
+#   exec_mem_limit: 2147483648
+#   scan_thread_num: 32
+#
+# 查看配置是否生效:
+#   kubectl exec -it <pod-name> -n doris -- cat /etc/doris/fe/fe.conf
+#
+# 验证配置:
+#   # FE
+#   kubectl exec doriscluster-local-fe-0 -n doris -- cat /opt/doris/fe/conf/fe.conf
+#   # BE
+#   kubectl exec doriscluster-local-be-0 -n doris -- cat /opt/doris/be/conf/be.conf
+# =============================================================================

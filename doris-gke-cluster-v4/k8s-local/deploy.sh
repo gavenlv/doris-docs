@@ -1,29 +1,29 @@
 #!/bin/bash
 # =============================================================================
-# Doris Local Kubernetes 部署脚本 (存储计算分离架构)
+# Doris Local Kubernetes 部署脚本
 # =============================================================================
 # 作用: 一键部署本地 Doris 集群
 # 适用: Docker Desktop Kubernetes、Minikube
 #
 # 部署组件:
-#   1. MinIO (S3 兼容对象存储)
-#   2. Doris Operator
-#   3. DorisCluster (3FE + 3BE)
+#   1. Doris Operator
+#   2. DorisCluster (1FE + 1BE) - 开发环境配置
+#   3. HPA (可选) - 自动扩缩容
 #
 # 前置条件:
 #   - Docker Desktop 已启用 Kubernetes
 #   - kubectl 已配置
-#   - 资源: 4核CPU + 16GB内存 + 100GB磁盘
+#   - 资源: 4核CPU + 16GB内存
 #
 # 使用方法:
 #   ./deploy.sh
 #
 # 部署顺序:
-#   1. 部署 MinIO
-#   2. 等待 MinIO 就绪
-#   3. 部署 Doris 配置
-#   4. 部署 Doris Operator
-#   5. 部署 DorisCluster
+#   1. 检查环境
+#   2. 部署 Doris Operator
+#   3. 创建命名空间和 RBAC
+#   4. 部署 DorisCluster
+#   5. 部署 HPA (可选)
 #   6. 等待集群就绪
 # =============================================================================
 
@@ -78,64 +78,32 @@ check_environment() {
     log_info "环境检查完成"
 }
 
-# 部署 MinIO
-deploy_minio() {
-    log_info "部署 MinIO 对象存储..."
-
-    # 创建 minio namespace 和资源
-    kubectl apply -f 00-namespace.yaml
-
-    # 等待 namespace 创建
-    kubectl wait --for=condition=Ready pods -l app.kubernetes.io/name=minio -n minio --timeout=120s 2>/dev/null || {
-        log_warn "MinIO 启动中，继续等待..."
-        sleep 30
-    }
-
-    # 检查 MinIO 状态
-    local minio_pods=$(kubectl get pods -n minio -l app.kubernetes.io/name=minio -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "Unknown")
-    log_info "MinIO Pod 状态: ${minio_pods}"
-
-    if [ "$minio_pods" != "Running" ]; then
-        log_warn "MinIO 可能未就绪，继续部署..."
-    fi
-
-    log_info "MinIO 部署完成"
-}
-
-# 部署 Doris 配置
-deploy_config() {
-    log_info "部署 Doris 配置..."
-
-    # 创建 namespace (如果不存在)
-    kubectl create namespace doris --dry-run=client -o yaml | kubectl apply -f -
-
-    # 部署配置
-    kubectl apply -f configmap.yaml
-
-    log_info "配置部署完成"
-}
-
 # 部署 Doris Operator
 deploy_operator() {
     log_info "部署 Doris Operator..."
 
-    # 部署 CRD
+    # 部署 CRD 和 Operator (使用本地配置)
     log_info "部署 DorisCluster CRD..."
-    kubectl apply -f https://raw.githubusercontent.com/apache/doris-operator/25.8.0/config/crd/bases/doris.apache.com_dorisclusters.yaml
-
-    # 部署 Operator
-    log_info "部署 Operator..."
-    kubectl apply -f https://raw.githubusercontent.com/apache/doris-operator/25.8.0/config/operator/operator.yaml
+    kubectl apply -f operator.yaml
 
     # 等待 Operator 就绪
     log_info "等待 Operator 启动..."
-    kubectl wait --for=condition=Ready pods -l app.kubernetes.io/name=doris-operator -n doris --timeout=180s || {
+    kubectl wait --for=condition=Ready pods -n doris-operator-system -l app.kubernetes.io/name=doris-operator --timeout=180s || {
         log_error "Operator 启动超时"
-        kubectl get pods -n doris
+        kubectl get pods -n doris-operator-system
         exit 1
     }
 
     log_info "Doris Operator 部署完成"
+}
+
+# 部署命名空间和 RBAC
+deploy_namespace() {
+    log_info "部署命名空间和 RBAC..."
+
+    kubectl apply -f 00-namespace.yaml
+
+    log_info "命名空间部署完成"
 }
 
 # 部署 DorisCluster
@@ -146,24 +114,36 @@ deploy_doriscluster() {
     kubectl apply -f doriscluster.yaml
 
     # 等待 FE 就绪
-    log_info "等待 FE 启动 (可能需要 5-10 分钟)..."
-    kubectl wait --for=condition=Ready pods -l app.kubernetes.io/component=fe -n doris --timeout=600s || {
-        log_error "FE 启动超时"
+    log_info "等待 FE 启动 (可能需要 3-5 分钟)..."
+    kubectl wait --for=condition=Ready pods -n doris -l app.doris.cluster/doriscluster-local --timeout=600s || {
+        log_warn "FE 启动超时，查看状态..."
         kubectl get pods -n doris
-        kubectl logs -l app.kubernetes.io/component=fe -n doris --tail=100
-        exit 1
+        kubectl logs -n doris -l app.doris.cluster/doriscluster-local --tail=50 || true
     }
 
     # 等待 BE 就绪
     log_info "等待 BE 启动..."
-    kubectl wait --for=condition=Ready pods -l app.kubernetes.io/component=be -n doris --timeout=600s || {
-        log_error "BE 启动超时"
+    kubectl wait --for=condition=Ready pods -n doris -l app.doris.cluster/doriscluster-local --timeout=600s || {
+        log_warn "BE 启动超时，查看状态..."
         kubectl get pods -n doris
-        kubectl logs -l app.kubernetes.io/component=be -n doris --tail=100
-        exit 1
     }
 
     log_info "DorisCluster 部署完成"
+}
+
+# 部署 HPA (可选)
+deploy_hpa() {
+    log_info "部署 HPA 自动扩缩容..."
+
+    # 检查 metrics-server 是否可用
+    if kubectl get pods -n kube-system -l k8s-app=metrics-server 2>/dev/null | grep -q Running; then
+        kubectl apply -f hpa.yaml
+        log_info "HPA 部署完成"
+    else
+        log_warn "metrics-server 未运行，HPA 可能无法正常工作"
+        log_warn "如需 HPA，请先安装 metrics-server:"
+        log_warn "  kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml"
+    fi
 }
 
 # 显示部署状态
@@ -181,42 +161,40 @@ show_status() {
     kubectl get svc -n doris
 
     echo ""
-    log_info "MinIO Service:"
-    kubectl get svc -n minio
+    log_info "HPA 状态 (如有):"
+    kubectl get hpa -n doris 2>/dev/null || echo "  HPA 未部署"
 
     echo ""
     log_info "=========================================="
     log_info "          访问信息"
     log_info "=========================================="
     echo ""
+
+    # 获取节点 IP
+    local node_ip=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || echo "localhost")
+
     log_info "Doris FE (MySQL):"
-    echo "   端口转发: kubectl port-forward -n doris svc/doriscluster-local-fe-service 9030:9030"
-    echo "   直接访问: mysql -h127.0.0.1 -P9030 -uroot"
+    echo "   地址: ${node_ip}"
+    echo "   端口: 30632 (NodePort)"
+    echo "   命令: mysql -h ${node_ip} -P 30632 -u root"
     echo ""
     log_info "Doris FE (Web UI):"
-    echo "   http://localhost:8030"
-    echo ""
-    log_info "MinIO Console:"
-    echo "   kubectl port-forward -n minio svc/minio 9001:9001"
-    echo "   http://localhost:9001"
-    echo "   账号: minioadmin"
-    echo "   密码: minioadmin"
+    echo "   地址: http://${node_ip}:30389"
     echo ""
     log_info "=========================================="
     log_info "          验证集群状态"
     log_info "=========================================="
     echo ""
-    echo "   # 端口转发"
-    echo "   kubectl port-forward -n doris svc/doriscluster-local-fe-service 9030:9030"
-    echo ""
     echo "   # 连接 Doris"
-    echo "   mysql -h127.0.0.1 -P9030 -uroot"
+    echo "   docker run --rm mysql:8 bash -c \"mysql -h ${node_ip} -P 30632 -u root -e 'SHOW FRONTENDS'\""
     echo ""
     echo "   # 执行验证 SQL"
     echo "   SHOW FRONTENDS;"
     echo "   SHOW BACKENDS;"
-    echo "   SHOW PROC '/frontends';"
-    echo "   SHOW PROC '/backends';"
+    echo ""
+    echo "   # 查看 HPA (如已部署)"
+    echo "   kubectl get hpa -n doris"
+    echo "   kubectl top pods -n doris"
     echo ""
 }
 
@@ -225,7 +203,7 @@ main() {
     echo ""
     log_info "=========================================="
     log_info "   Doris Local Kubernetes 部署脚本"
-    log_info "   (存储计算分离 + MinIO)"
+    log_info "   (开发环境配置)"
     log_info "=========================================="
     echo ""
 
@@ -233,10 +211,17 @@ main() {
     check_environment
 
     # 部署
-    deploy_minio
-    deploy_config
     deploy_operator
+    deploy_namespace
     deploy_doriscluster
+
+    # 询问是否部署 HPA
+    echo ""
+    read -p "是否部署 HPA 自动扩缩容? (y/N): " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        deploy_hpa
+    fi
 
     # 显示状态
     show_status
