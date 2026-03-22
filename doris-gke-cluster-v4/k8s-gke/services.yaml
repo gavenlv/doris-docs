@@ -1,0 +1,157 @@
+# =============================================================================
+# GKE 服务配置 - 负载均衡和入口配置
+# =============================================================================
+#
+# 本文件包含：
+# 1. BackendConfig: GCE 负载均衡后端配置
+# 2. Ingress: 外部访问入口
+# 3. ManagedCertificate: SSL 证书（可选）
+#
+# GKE 负载均衡架构：
+# 1. Ingress 创建 GCE Load Balancer
+# 2. Load Balancer 将流量分发到 NodePort
+# 3. NodePort 将流量转发到 Service
+# 4. Service 将流量路由到 Pod
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# BackendConfig: GCE 健康检查配置
+# -----------------------------------------------------------------------------
+#
+# 什么是 BackendConfig？
+# - GCE Load Balancer 的健康检查配置
+# - 定义如何检查后端服务是否健康
+# - 替代默认的 TCP 端口检查
+#
+# 为什么需要自定义健康检查？
+# - Doris 的健康检查端点是 HTTP /api/health
+# - TCP 端口检查无法验证应用层是否正常
+# - HTTP 检查更准确
+
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: doris-fe-backend-config
+  namespace: doris
+spec:
+  healthCheck:
+    # 检查间隔（秒）
+    checkIntervalSec: 10
+    # 超时（秒）
+    timeoutSec: 5
+    # 连续成功次数视为健康
+    healthyThreshold: 2
+    # 连续失败次数视为不健康
+    unhealthyThreshold: 3
+    # 健康检查类型：HTTP
+    type: HTTP
+    # 健康检查路径
+    requestPath: /api/health
+    # 健康检查端口
+    port: 8030
+
+---
+# =============================================================================
+# Ingress: 外部访问入口
+# =============================================================================
+#
+# 什么是 Ingress？
+# - K8s 资源，定义外部访问规则
+# - GKE 会创建 GCE Load Balancer
+# - 支持 HTTPS、域名、路径路由
+#
+# Ingress 类型：
+# - GCE: 使用 Google Cloud Load Balancer
+# - Nginx: 使用 Nginx Ingress Controller
+# =============================================================================
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: doris-ingress
+  namespace: doris
+  annotations:
+    # 使用 GCE Ingress Controller
+    kubernetes.io/ingress.class: gce
+
+    # 禁止 HTTP 访问（强制 HTTPS）
+    kubernetes.io/ingress.allow-http: "false"
+
+    # 托管证书（需要预先配置域名）
+    networking.gke.io/managed-certificates: "doris-cert"
+
+spec:
+  # TLS 配置
+  tls:
+    - secretName: doris-tls
+      hosts:
+        # 替换为实际域名
+        - doris.example.com
+
+  rules:
+    - host: doris.example.com
+      http:
+        paths:
+          - path: /*
+            pathType: Prefix
+            backend:
+              service:
+                name: doriscluster-fe-service
+                port:
+                  number: 8030
+
+---
+# =============================================================================
+# ManagedCertificate: Google 托管 SSL 证书
+# =============================================================================
+#
+# 什么是 ManagedCertificate？
+# - Google Cloud 自动管理的 SSL 证书
+# - 免费、自动续期
+# - 需要配合域名使用
+#
+# 前置条件：
+# 1. 域名已解析到 Load Balancer IP
+# 2. 域名在 Google Cloud Console 中配置
+#
+# 注意：取消注释以下内容并替换域名为实际值
+# =============================================================================
+
+# apiVersion: networking.gke.io/v1
+# kind: ManagedCertificate
+# metadata:
+#   name: doris-cert
+#   namespace: doris
+# spec:
+#   domains:
+#     - doris.example.com
+
+# =============================================================================
+# 访问方式汇总
+# =============================================================================
+#
+# 方式 1: 直接通过 Service（简单）
+# ----------------------------------------
+# - FE: <cluster-ip>:8030 (MySQL)
+# - BE: <cluster-ip>:8040 (Web UI)
+# - 适用于：开发测试、快速验证
+#
+# 方式 2: NodePort（中小规模）
+# ----------------------------------------
+# - 获取 Node IP + NodePort
+# - 适用于：不需要固定 IP 的场景
+#
+# 方式 3: LoadBalancer（生产推荐）
+# ----------------------------------------
+# - 自动创建云厂商负载均衡器
+# - 获取固定公网 IP
+# - 支持 HTTPS
+# - 适用于：生产环境
+#
+# 方式 4: Ingress（多服务统一入口）
+# ----------------------------------------
+# - 支持域名、路径路由
+# - 支持 SSL 终止
+# - 适用于：需要 HTTPS 访问的场景
+#
+# =============================================================================

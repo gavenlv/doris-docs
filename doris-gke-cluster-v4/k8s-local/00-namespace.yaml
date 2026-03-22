@@ -1,0 +1,392 @@
+# =============================================================================
+# Namespace、StorageClass、MinIO 和 RBAC 配置 (Local 开发环境)
+# =============================================================================
+# 作用: 定义本地 K8s 命名空间、存储类和 MinIO 部署配置
+# 为什么需要: 本地环境没有 GCS，需要 MinIO 替代
+# 适用: Docker Desktop Kubernetes、Minikube、本地开发
+#
+# MinIO 说明:
+#   MinIO 是 S3 兼容的对象存储，可本地部署
+#   用于替代 GCS，实现存储计算分离
+#   特点:
+#   - S3 兼容 API
+#   - 高性能
+#   - 轻量级，易部署
+#   - 适合开发和测试
+#
+# 存储架构:
+#   FE 元数据: Local PV (HostPath)
+#   BE 数据: MinIO (S3 兼容)
+#   BE 缓存: Local PV / EmptyDir
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 命名空间定义
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: doris
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/managed-by: kubectl
+    environment: development
+---
+# -----------------------------------------------------------------------------
+# MinIO 命名空间
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: minio
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/managed-by: kubectl
+---
+# =============================================================================
+# StorageClass 配置
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# StorageClass - FE 元数据存储 (Local PV)
+# -----------------------------------------------------------------------------
+# 作用: 为 FE 元数据提供持久化存储
+# 说明: 本地开发环境使用 HostPath 或 Local PV
+# 注意: 生产环境不要使用 HostPath！
+kind: StorageClass
+apiVersion: storage.k8s.io/v1
+metadata:
+  name: doris-fe-storage
+  labels:
+    app.kubernetes.io/name: doris
+provisioner: kubernetes.io/host-path
+# 注意: HostPath 仅适用于单节点集群！
+# 生产或多人协作环境使用:
+#   - GKE: doris-regional-storage
+#   - EKS: gp3 / gp2
+#   - AKS: managed-premium
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+---
+# -----------------------------------------------------------------------------
+# StorageClass - BE 数据缓存 (Local PV)
+# -----------------------------------------------------------------------------
+kind: StorageClass
+apiVersion: storage.k8s.io/v1
+metadata:
+  name: doris-be-storage
+  labels:
+    app.kubernetes.io/name: doris
+provisioner: kubernetes.io/host-path
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+---
+# -----------------------------------------------------------------------------
+# StorageClass - MinIO 存储
+# -----------------------------------------------------------------------------
+kind: StorageClass
+apiVersion: storage.k8s.io/v1
+metadata:
+  name: minio-storage
+  labels:
+    app.kubernetes.io/name: minio
+provisioner: kubernetes.io/host-path
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+---
+# =============================================================================
+# MinIO 部署配置
+# =============================================================================
+# 作用: 本地 S3 兼容对象存储，替代 GCS
+# 说明: 单机 MinIO，用于开发和测试
+# 注意: 生产环境使用分布式 MinIO 或云存储！
+
+# -----------------------------------------------------------------------------
+# MinIO Service
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: minio
+  labels:
+    app.kubernetes.io/name: minio
+spec:
+  type: ClusterIP
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+  selector:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: server
+---
+# -----------------------------------------------------------------------------
+# MinIO Deployment
+# -----------------------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: minio
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: minio
+      app.kubernetes.io/component: server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: minio
+        app.kubernetes.io/component: server
+    spec:
+      containers:
+        # ---------------------------------------------------------------------------
+        # MinIO 容器配置
+        # ---------------------------------------------------------------------------
+        - name: minio
+          # MinIO 最新稳定版镜像
+          # 说明: 使用官方 MinIO 镜像
+          image: minio/minio:latest
+          # 资源限制
+          # 说明: 开发环境资源限制
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 2
+              memory: 4Gi
+          # ---------------------------------------------------------------------------
+          # MinIO 启动命令
+          # ---------------------------------------------------------------------------
+          # 说明:
+          #   server: 启动服务器模式
+          #   /data: 数据存储目录
+          #   --console-address: Console UI 地址
+          args:
+            - server
+            - /data
+            - --console-address
+            - ":9001"
+          # ---------------------------------------------------------------------------
+          # 环境变量
+          # ---------------------------------------------------------------------------
+          # 说明: MinIO 访问凭证
+          # 默认账号密码: minioadmin / minioadmin
+          # 生产环境必须修改！
+          env:
+            - name: MINIO_ROOT_USER
+              value: "minioadmin"
+            - name: MINIO_ROOT_PASSWORD
+              value: "minioadmin"
+          # ---------------------------------------------------------------------------
+          # 端口
+          # ---------------------------------------------------------------------------
+          ports:
+            - name: api
+              containerPort: 9000
+              protocol: TCP
+            - name: console
+              containerPort: 9001
+              protocol: TCP
+          # ---------------------------------------------------------------------------
+          # 健康检查
+          # ---------------------------------------------------------------------------
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 20
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 20
+            failureThreshold: 3
+          # ---------------------------------------------------------------------------
+          # 存储
+          # ---------------------------------------------------------------------------
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      # ---------------------------------------------------------------------------
+      # 存储卷
+      # ---------------------------------------------------------------------------
+      volumes:
+        - name: data
+          # 开发环境使用 EmptyDir
+          # 注意: 数据临时存储，Pod 删除后数据丢失！
+          # 生产环境使用 PVC
+          emptyDir: {}
+---
+# =============================================================================
+# ServiceAccount 配置
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# FE ServiceAccount
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: doris-fe
+  namespace: doris
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/component: fe
+---
+# -----------------------------------------------------------------------------
+# BE ServiceAccount
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: doris-be
+  namespace: doris
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/component: be
+---
+# =============================================================================
+# RBAC 配置
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# FE RBAC
+# -----------------------------------------------------------------------------
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: doris-fe-role
+  namespace: doris
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/status"]
+    verbs: ["update", "patch"]
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: doris-fe-rolebinding
+  namespace: doris
+subjects:
+  - kind: ServiceAccount
+    name: doris-fe
+    namespace: doris
+roleRef:
+  kind: Role
+  name: doris-fe-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# -----------------------------------------------------------------------------
+# BE RBAC
+# -----------------------------------------------------------------------------
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: doris-be-role
+  namespace: doris
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/status"]
+    verbs: ["update", "patch"]
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: doris-be-rolebinding
+  namespace: doris
+subjects:
+  - kind: ServiceAccount
+    name: doris-be
+    namespace: doris
+roleRef:
+  kind: Role
+  name: doris-be-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# =============================================================================
+# MinIO Bucket 配置 (可选)
+# =============================================================================
+# 作用: 自动创建 Doris 使用的 bucket
+# 说明: 需要 MinIO Client (mc) 工具
+# 注意: 仅适用于开发环境，生产环境应预先创建
+
+# -----------------------------------------------------------------------------
+# MinIO Bucket Job
+# -----------------------------------------------------------------------------
+# 说明: 初始化 Job，创建必要的 bucket
+# 使用方法:
+#   kubectl apply -f 00-namespace.yaml
+#   kubectl apply -f 00-namespace.yaml  # 再次执行以创建 bucket
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-init
+  namespace: minio
+  labels:
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: init
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: minio
+        app.kubernetes.io/component: init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        # ---------------------------------------------------------------------------
+        # MinIO Client 容器
+        # ---------------------------------------------------------------------------
+        - name: mc
+          image: minio/mc:latest
+          command:
+            - /bin/sh
+            - -c
+            # ---------------------------------------------------------------------------
+            # 等待 MinIO 启动并创建 bucket
+            # ---------------------------------------------------------------------------
+            - |
+              # 等待 MinIO 就绪
+              echo "Waiting for MinIO to be ready..."
+              sleep 10
+
+              # 配置 mc 别名
+              mc alias set myminio http://minio:9000 minioadmin minioadmin
+
+              # 创建 bucket
+              echo "Creating bucket: doris-data..."
+              mc mb myminio/doris-data --ignore-existing
+
+              # 设置 bucket 策略为 public (开发环境)
+              # 生产环境使用私有策略
+              echo "Setting bucket policy..."
+              mc anonymous set download myminio/doris-data
+
+              echo "MinIO initialization complete!"
+          env:
+            - name: MINIO_ROOT_USER
+              value: "minioadmin"
+            - name: MINIO_ROOT_PASSWORD
+              value: "minioadmin"

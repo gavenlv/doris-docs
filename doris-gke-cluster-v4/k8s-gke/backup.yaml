@@ -1,0 +1,147 @@
+# =============================================================================
+# Doris 定时备份配置
+# =============================================================================
+#
+# 什么是定时备份？
+# - 使用 CronJob 定期执行备份任务
+# - 备份 Doris 的元数据到对象存储
+# - 支持 GCS (Google Cloud Storage)、S3、Azure Blob 等
+#
+# 备份类型：
+# 1. Snapshot Backup: 快照备份（常用）
+#    - 创建只读快照
+#    - 快速、高效
+#    - 支持增量备份
+#
+# 2. Full Backup: 全量备份
+#    - 导出所有数据
+#    - 恢复简单
+#    - 数据量大时耗时
+#
+# 备份频率建议：
+# - 核心业务：每日备份
+# - 一般业务：每周备份
+# - 日志：保留 7-30 天
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# CronJob: 定时备份任务
+# -----------------------------------------------------------------------------
+#
+# 什么是 CronJob？
+# - K8s 定时任务资源
+# - 类似 Linux cron，指定时间执行任务
+# - 语法：分 时 日 月 周
+#
+# Cron 表达式：
+# - "0 2 * * *"  = 每天凌晨 2:00
+# - "0 */6 * * *" = 每 6 小时
+# - "0 0 * * 0"  = 每周日午夜
+# - "0 0 1 * *"  = 每月 1 日午夜
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: doris-backup
+  namespace: doris
+spec:
+  # schedule: Cron 表达式
+  schedule: "0 2 * * *"  # 每天凌晨 2 点执行
+
+  # successfulJobsHistoryLimit: 保留成功的 Job 数量
+  successfulJobsHistoryLimit: 3
+
+  # failedJobsHistoryLimit: 保留失败的 Job 数量
+  failedJobsHistoryLimit: 3
+
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure  # 失败时重启容器
+          containers:
+            - name: backup
+              image: apache/doris:fe-3.1.4
+              command:
+                - bash
+                - -c
+                - |
+                  # ================================================
+                  # 备份脚本
+                  # ================================================
+
+                  # 当前时间戳（用于备份目录命名）
+                  BACKUP_DATE=$(date +%Y%m%d%H%M%S)
+
+                  # 备份存储路径（替换为实际的对象存储路径）
+                  # 支持：gs:// (GCS)、s3:// (AWS S3)、wasb:// (Azure)
+                  BACKUP_PATH="gs://your-bucket/doris-backup/${BACKUP_DATE}"
+
+                  # ================================================
+                  # 执行备份
+                  # ================================================
+                  mysql -h doriscluster-fe-service -P9030 -uroot -e "BACKUP SNAPSHOT doris_repo TO ${BACKUP_PATH};"
+
+                  # ================================================
+                  # 清理过期备份（保留 7 天）
+                  # ================================================
+                  mysql -h doriscluster-fe-service -P9030 -uroot -e "SHOW SNAPSHOTS FROM doris_repo;" | grep -E "^[0-9]" | while read line; do
+                    SNAPSHOT_NAME=$(echo $line | awk '{print $2}')
+                    SNAPSHOT_TIME=$(echo $line | awk '{print $4}' | sed 's/-//g' | sed 's/T//' | sed 's/://g')
+                    CURRENT_TIME=$(date +%Y%m%d%H%M%S | cut -c1-8)
+                    # 删除 7 天前的快照
+                    if [ $SNAPSHOT_TIME -lt $(($CURRENT_TIME - 7000000)) ]; then
+                      mysql -h doriscluster-fe-service -P9030 -uroot -e "DROP SNAPSHOT doris_repo.${SNAPSHOT_NAME};"
+                    fi
+                  done
+
+              # 环境变量（使用 Secret 存储密码）
+              env:
+                - name: MYSQL_ROOT_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: doris-secret
+                      key: mysql-root-password
+
+---
+# =============================================================================
+# Secret: 存储敏感信息
+# =============================================================================
+#
+# 为什么要用 Secret？
+# - 密码不应该明文写在配置中
+# - Secret 可以单独管理权限
+# - 便于更新密码而不需要重新部署
+#
+# 注意：实际使用时替换为真正的密码
+# =============================================================================
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: doris-secret
+  namespace: doris
+type: Opaque
+stringData:
+  # MySQL root 密码
+  mysql-root-password: your-secure-password
+
+# =============================================================================
+# 备份恢复操作
+# =============================================================================
+#
+# 查看可用快照：
+# SHOW SNAPSHOTS FROM doris_repo;
+#
+# 恢复到指定快照：
+# RESTORE SNAPSHOT doris_repo FROM "gs://bucket/path/snapshot_name";
+#
+# 删除快照：
+# DROP SNAPSHOT doris_repo."snapshot_name";
+#
+# 注意事项：
+# - 恢复期间集群可能不可用
+# - 建议在低峰期操作
+# - 恢复后验证数据完整性
+#
+# =============================================================================

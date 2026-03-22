@@ -1,24 +1,71 @@
+# =============================================================================
+# Doris FE (Frontend) Kubernetes 部署配置
+# =============================================================================
+#
+# 本文件包含：
+# 1. Service: FE 服务定义，用于服务发现
+# 2. Deployment: FE 部署配置，定义 Pod 规格
+#
+# FE 组件作用：
+# - 接收用户查询请求
+# - 管理元数据（表结构、用户权限等）
+# - SQL 解析和执行计划生成
+# - 协调 BE 执行查询
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Service: FE 服务
+# -----------------------------------------------------------------------------
+#
+# Service 作用：
+# - 提供稳定的访问入口
+# - 负载均衡到多个 Pod
+# - 服务发现（其他组件通过服务名访问）
+#
+# Service 类型：
+# - ClusterIP: 仅集群内部访问（默认）
+# - NodePort: 通过节点端口访问
+# - LoadBalancer: 云厂商负载均衡器
+
 apiVersion: v1
 kind: Service
 metadata:
-  name: doris-fe
+  name: doris-fe              # Service 名称
   namespace: doris
   labels:
-    app: doris
-    component: fe
+    app: doris               # 标签
+    component: fe            # 组件标签
 spec:
+  # Service 类型
   type: ClusterIP
+
+  # 服务端口定义
   ports:
+    # HTTP 端口：Web UI、监控指标、健康检查
     - port: 8030
       name: fe-http
+    # MySQL 端口：JDBC/ODBC 连接
     - port: 9030
       name: fe-mysql
+    # 复制端口：FE 之间同步元数据
     - port: 9010
       name: fe-rep
+
+  # selector: 选择哪些 Pod 加入此 Service
   selector:
     app: doris
     component: fe
+
 ---
+# =============================================================================
+# Deployment: FE 部署
+# =============================================================================
+#
+# Deployment 作用：
+# - 管理 Pod 副本
+# - 滚动更新和回滚
+# - 自愈能力（Pod 失败自动重启）
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -28,30 +75,58 @@ metadata:
     app: doris
     component: fe
 spec:
+  # 副本数：生产建议至少 3
   replicas: 3
+
+  # selector: 选择要管理的 Pod
   selector:
     matchLabels:
       app: doris
       component: fe
+
+  # pod template: Pod 规格
   template:
     metadata:
       labels:
         app: doris
         component: fe
     spec:
+      # 镜像拉取密钥（用于私有镜像仓库）
       imagePullSecrets:
         - name: nexus-secret
+
+      # -------------------------------------------------------------------------
+      # Init Containers: 初始化容器
+      # -------------------------------------------------------------------------
+      # 初始化容器在主容器启动前运行
+      # 用于做一些准备工作
       initContainers:
+        # 修复权限：确保 Doris 用户可以写入目录
         - name: fix-permissions
           image: busybox:latest
-          command: ["sh", "-c", "chown -R 1000:1000 /opt/doris"]
+          command:
+            - sh
+            - -c
+            - "chown -R 1000:1000 /opt/doris"
           volumeMounts:
             - name: data
               mountPath: /opt/doris
+
+      # -------------------------------------------------------------------------
+      # Containers: 主容器
+      # -------------------------------------------------------------------------
       containers:
         - name: fe
+          # 镜像地址（私有仓库）
           image: nexus.company.com:8082/doris/fe:2.1.7-secure
+
+          # 镜像拉取策略
+          # - Always: 每次都拉取新镜像
+          # - IfNotPresent: 本地没有才拉取
+          # - Never: 从不拉取
           imagePullPolicy: Always
+
+          # 容器端口
           ports:
             - containerPort: 8030
               name: fe-http
@@ -59,46 +134,103 @@ spec:
               name: fe-mysql
             - containerPort: 9010
               name: fe-rep
+
+          # 环境变量：传递给容器的配置
           env:
+            # FE_SERVERS: FE 集群地址列表
+            # 格式：fe1:host:port,fe2:host:port
             - name: FE_SERVERS
               value: "fe1:9010,fe2:9010,fe3:9010"
+
+            # FE_ID: 当前 FE 实例 ID
+            # 从 Pod 名称中提取（如 fe1, fe2）
             - name: FE_ID
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+
+          # 资源配置
           resources:
             requests:
+              # requests: 调度所需最小资源
               cpu: "4"
               memory: "16Gi"
             limits:
+              # limits: 最大可用资源
               cpu: "8"
               memory: "32Gi"
+
+          # 卷挂载
           volumeMounts:
+            # 数据目录
             - name: data
               mountPath: /opt/doris/fe/doris-meta
+            # 日志目录
             - name: log
               mountPath: /opt/doris/fe/log
+
+          # -------------------------------------------------------------------------
+          # 健康检查
+          # -------------------------------------------------------------------------
+          # startupProbe: 启动探针（容器启动时使用）
+          # - 容器启动较慢时，防止过早检查导致误判
           startupProbe:
             httpGet:
               path: /api/health
               port: 8030
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            timeoutSeconds: 5
+            initialDelaySeconds: 30      # 启动后 30 秒开始检查
+            periodSeconds: 10           # 每 10 秒检查一次
+            timeoutSeconds: 5           # 5 秒超时
+
+          # readinessProbe: 就绪探针
+          # - 检查容器是否可以接收流量
+          # - 不可用时从 Service 中移除
           readinessProbe:
             httpGet:
               path: /api/health
               port: 8030
             initialDelaySeconds: 30
             periodSeconds: 10
+            timeoutSeconds: 5
+
+          # livenessProbe: 存活探针
+          # - 检查容器是否存活
+          # - 失败时重启容器
           livenessProbe:
             httpGet:
               path: /api/health
               port: 8030
-            initialDelaySeconds: 60
-            periodSeconds: 30
+            initialDelaySeconds: 60     # 启动后 60 秒开始检查
+            periodSeconds: 30           # 每 30 秒检查一次
+            timeoutSeconds: 5
+
+      # -------------------------------------------------------------------------
+      # Volumes: 卷定义
+      # -------------------------------------------------------------------------
       volumes:
+        # 数据卷（emptyDir: 临时目录，Pod 删除后数据丢失）
         - name: data
           emptyDir: {}
+        # 日志卷
         - name: log
           emptyDir: {}
+
+# =============================================================================
+# 配置参考
+# =============================================================================
+#
+# 端口说明：
+# | 端口 | 协议 | 用途 | 访问来源 |
+# |------|------|------|---------|
+# | 8030 | HTTP | Web UI、监控 | 浏览器、Prometheus |
+# | 9030 | MySQL | SQL 连接 | 客户端、BI 工具 |
+# | 9010 | Thrift | FE 间通信 | 其他 FE |
+#
+# 资源规划：
+# | 环境 | CPU | 内存 | 副本数 |
+# |------|-----|------|--------|
+# | 开发 | 2C | 4Gi | 1 |
+# | 测试 | 4C | 8Gi | 1 |
+# | 生产 | 8C | 16-32Gi | 3 |
+#
+# =============================================================================

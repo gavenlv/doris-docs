@@ -1,0 +1,53 @@
+# =============================================================================
+# DorisCluster CRD 配置 (Local 开发版本)
+# =============================================================================
+# 使用空目录存储 (emptyDir) - 适用于 Docker Desktop 本地开发
+# 注意: 数据在 Pod 重启后会丢失，仅用于开发/测试
+# =============================================================================
+
+apiVersion: doris.selectdb.com/v1
+kind: DorisCluster
+metadata:
+  name: doriscluster-local
+  namespace: doris
+spec:
+  feSpec:
+    replicas: 1
+    image: apache/doris:fe-3.1.4
+    limits:
+      cpu: 2
+      memory: 8Gi
+    requests:
+      cpu: 1
+      memory: 4Gi
+    # 不使用 ConfigMap，让 FE 使用镜像内默认配置（可写）
+    # FE 使用空目录存储 (开发环境)
+    service:
+      type: NodePort
+
+  beSpec:
+    replicas: 1
+    image: apache/doris:be-3.1.4
+    limits:
+      cpu: 4
+      memory: 16Gi
+    requests:
+      cpu: 2
+      memory: 8Gi
+    configMapInfo:
+      configMapName: be-config
+      resolveKey: be.conf
+    # BE 使用空目录存储 (开发环境)
+    service:
+      type: ClusterIP
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-credential
+  namespace: doris
+type: Opaque
+stringData:
+  username: root
+  password: ""

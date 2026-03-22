@@ -1,10 +1,40 @@
+# =============================================================================
+# Doris FE 本地 K8s 部署配置 (Docker Desktop)
+# =============================================================================
+#
+# 用途：使用传统 Deployment 方式在本地 K8s 部署 FE
+#
+# 注意：这是旧版配置，推荐使用 k8s-local/ 目录下的 DorisCluster 方式
+# 本文件保留用于参考
+#
+# 与 DorisCluster 的区别：
+# - 使用原生 K8s Deployment，不依赖 Doris Operator
+# - 需要手动管理服务发现
+# - 不支持某些高级特性
+# =============================================================================
+
 apiVersion: v1
 kind: Namespace
 metadata:
   name: doris
   labels:
     name: doris
+
 ---
+# =============================================================================
+# Service: FE 服务 (NodePort 模式)
+# =============================================================================
+#
+# Service 类型：
+# - NodePort: 通过节点端口访问
+#   - 宿主机 IP + 端口访问
+#   - 适合开发测试
+# - ClusterIP: 仅集群内部访问
+# - LoadBalancer: 云负载均衡器
+#
+# NodePort 端口范围：30000-32767
+# =============================================================================
+
 apiVersion: v1
 kind: Service
 metadata:
@@ -14,11 +44,11 @@ metadata:
     app: doris
     component: fe
 spec:
-  type: NodePort
+  type: NodePort        # NodePort 模式，可通过宿主机 IP 访问
   ports:
     - port: 8030
       name: fe-http
-      targetPort: 8030
+      targetPort: 8030  # 容器端口
     - port: 9030
       name: fe-mysql
       targetPort: 9030
@@ -28,7 +58,12 @@ spec:
   selector:
     app: doris
     component: fe
+
 ---
+# =============================================================================
+# Deployment: FE 部署
+# =============================================================================
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -38,20 +73,24 @@ metadata:
     app: doris
     component: fe
 spec:
-  replicas: 1
+  replicas: 1            # 本地开发使用单副本
   selector:
     matchLabels:
       app: doris
       component: fe
+
   template:
     metadata:
       labels:
         app: doris
         component: fe
+
     spec:
       containers:
         - name: fe
+          # 官方镜像，无需私有仓库认证
           image: apache/doris:fe-3.1.4
+
           ports:
             - containerPort: 8030
               name: fe-http
@@ -59,9 +98,13 @@ spec:
               name: fe-mysql
             - containerPort: 9010
               name: fe-rep
+
           env:
+            # FE 服务器列表（本地单节点）
             - name: FE_SERVERS
               value: "fe1:127.0.0.1:9010"
+
+          # 开发环境资源配置
           resources:
             requests:
               cpu: "1"
@@ -69,28 +112,54 @@ spec:
             limits:
               cpu: "2"
               memory: "4Gi"
+
           volumeMounts:
+            # 数据目录
             - name: data
               mountPath: /opt/doris/fe/doris-meta
+            # 日志目录
             - name: log
               mountPath: /opt/doris/fe/log
+
+          # TCP 端口检查（比 HTTP 更简单）
           startupProbe:
             tcpSocket:
               port: 8030
             initialDelaySeconds: 30
             periodSeconds: 10
+
           readinessProbe:
             tcpSocket:
               port: 8030
             initialDelaySeconds: 30
             periodSeconds: 10
+
           livenessProbe:
             tcpSocket:
               port: 8030
             initialDelaySeconds: 60
             periodSeconds: 30
+
       volumes:
+        # 临时存储（Pod 删除后数据丢失）
         - name: data
           emptyDir: {}
         - name: log
           emptyDir: {}
+
+# =============================================================================
+# 访问方式
+# =============================================================================
+#
+# 1. 通过 Service NodePort 访问
+#    - 获取节点 IP: minikube ip 或 docker-desktop IP
+#    - FE MySQL: <节点IP>:9030
+#    - FE HTTP: <节点IP>:8030
+#
+# 2. 通过端口转发访问
+#    kubectl port-forward -n doris svc/doris-fe 8030:8030 9030:9030
+#
+# 3. 连接集群
+#    mysql -h127.0.0.1 -P9030 -uroot
+#
+# =============================================================================

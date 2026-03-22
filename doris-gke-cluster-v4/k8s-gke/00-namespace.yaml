@@ -1,0 +1,235 @@
+# =============================================================================
+# Namespace、StorageClass 和 RBAC 配置
+# =============================================================================
+# 作用: 定义 K8s 命名空间、存储类和权限，为 Doris 集群提供基础资源
+# 为什么: 隔离不同环境的资源，提供持久化存储和访问控制
+# 适用: GKE 生产环境
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 命名空间定义
+# -----------------------------------------------------------------------------
+# 什么是 Namespace: K8s 中的资源隔离机制，用于分隔不同项目/环境/团队的资源
+# 为什么需要: 实现资源隔离、权限控制和配额管理
+# 可选值:
+#   - doris (默认)
+#   - doris-prod (生产环境)
+#   - doris-dev (开发环境)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: doris
+  labels:
+    # 标签用于组织和筛选资源
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/managed-by: kubectl
+    # 环境标签便于识别
+    environment: production
+    # GKE 集群标签，便于成本核算
+    cloud.google.com/gke-cluster: "doris-cluster"
+---
+# -----------------------------------------------------------------------------
+# GKE StorageClass - Regional PD (区域持久化磁盘)
+# -----------------------------------------------------------------------------
+# 作用: 提供区域级持久化存储，支持高可用
+# 为什么用 Regional PD: 数据在区域内两个区域复制，保证高可用
+# 适用场景: FE 元数据、BE 热点数据
+#
+# StorageClass 参数说明:
+#   type: pd-standard (标准盘) / pd-ssd (SSD) / pd-balanced (平衡)
+#   replication-type: regional (区域复制) / zonal (单区域)
+#
+# 性能对比:
+#   | 类型       | 吞吐量 (MB/s) | IOPS/GB | 成本   |
+#   |------------|---------------|---------|--------|
+#   | pd-standard| 120-240       | 0.75    | 低     |
+#   | pd-ssd     | 240-380       | 6       | 高     |
+#   | pd-balanced| 180-300       | 3       | 中     |
+kind: StorageClass
+apiVersion: storage.k8s.io/v1
+metadata:
+  name: doris-regional-storage
+  # 不设置 annotation 让 GKE 使用默认的 StorageClass 策略
+  labels:
+    app.kubernetes.io/name: doris
+provisioner: kubernetes.io/gce-pd
+# ---------------------------------------------------------------------------
+# GCE PD 配置参数
+# ---------------------------------------------------------------------------
+# parameters:
+#   type: 存储盘类型
+#     - pd-standard: 标准硬盘，适合大顺序读写
+#     - pd-ssd: 固态硬盘，适合随机读写和低延迟
+#     - pd-balanced: 平衡类型，SSD 和成本的折中
+#   replication-type: 复制类型
+#     - regional: 区域级复制，数据在区域内两个 zone 复制
+#     - zonal: 单区域，仅在一个 zone 存储
+parameters:
+  type: pd-ssd                    # FE 元数据建议使用 SSD 保证性能
+  replication-type: regional       # 区域复制保证高可用
+# ---------------------------------------------------------------------------
+# 回收策略
+# ---------------------------------------------------------------------------
+# reclaimPolicy: 当 PVC 删除时的数据处理策略
+#   - Delete (默认): 删除 PVC 时自动删除 PV 和数据 ⚠️ 危险
+#   - Retain: 保留数据便于恢复 ✅ 推荐生产使用
+reclaimPolicy: Retain
+# ---------------------------------------------------------------------------
+# 挂载选项
+# ---------------------------------------------------------------------------
+# mountOptions:
+#   - rw: 读写模式
+#   - noatime: 不更新访问时间，提升性能
+mountOptions:
+  - rw
+  - noatime
+---
+# -----------------------------------------------------------------------------
+# GKE StorageClass - 本地 SSD (高性能缓存)
+# -----------------------------------------------------------------------------
+# 作用: 提供本地 SSD 存储，用于 BE 节点高性能缓存
+# 为什么用本地 SSD: 比网络存储延迟低 10 倍以上
+# 适用场景: BE 热数据缓存、临时文件
+#
+# 警告: 本地 SSD 数据不会复制，节点故障时数据丢失！
+kind: StorageClass
+apiVersion: storage.k8s.io/v1
+metadata:
+  name: doris-local-ssd
+  labels:
+    app.kubernetes.io/name: doris
+provisioner: kubernetes.io/gce-pd
+parameters:
+  type: local-ssd               # 本地 SSD
+# ---------------------------------------------------------------------------
+# 重要: 本地 SSD 不支持动态创建，必须预先配置节点池！
+# ---------------------------------------------------------------------------
+reclaimPolicy: Delete            # 本地 SSD 不需要 Retain
+volumeBindingMode: WaitForFirstConsumer  # 等待 Pod 调度后再绑定
+---
+# -----------------------------------------------------------------------------
+# GCS StorageClass (对象存储 - 不需要 StorageClass)
+# -----------------------------------------------------------------------------
+# 说明: GCS (Google Cloud Storage) 是托管服务，不需要 K8s StorageClass
+#       BE 节点通过 S3 协议访问 GCS
+# 配置方式: 在 DorisCluster CRD 的 configMapspec 中配置
+#
+# GCS 访问模式:
+#   1. Workload Identity (推荐): GKE 节点使用 GCP Service Account
+#   2. Service Account Key: 通过 secret 配置凭证
+#   3. 公共访问: 不需要认证 (仅测试环境)
+#
+# GCS 存储类型:
+#   - Standard: 热数据，高访问频率
+#   - Nearline: 冷数据，< 30 天访问一次
+#   - Coldline: 归档，< 90 天访问一次
+#   - Archive: 长期归档，< 365 天访问一次
+---
+# -----------------------------------------------------------------------------
+# ServiceAccount - FE
+# -----------------------------------------------------------------------------
+# 作用: 为 FE Pod 提供 K8s API 访问权限
+# 为什么需要: Operator 需要通过 ServiceAccount 管理 Pod
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: doris-fe
+  namespace: doris
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/component: fe
+---
+# -----------------------------------------------------------------------------
+# ServiceAccount - BE
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: doris-be
+  namespace: doris
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/component: be
+---
+# -----------------------------------------------------------------------------
+# RBAC - FE 角色绑定
+# -----------------------------------------------------------------------------
+# 作用: 授予 FE Pod 必要的 K8s 权限
+# 权限范围: 只能管理 own Pods，不影响其他资源
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: doris-fe-role
+  namespace: doris
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/component: fe
+rules:
+  # FE 需要能够获取 Pod 列表用于集群发现
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  # FE 需要更新自己的状态
+  - apiGroups: [""]
+    resources: ["pods/status"]
+    verbs: ["update", "patch"]
+  # FE 需要获取 Service 用于服务发现
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch"]
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: doris-fe-rolebinding
+  namespace: doris
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/component: fe
+subjects:
+  - kind: ServiceAccount
+    name: doris-fe
+    namespace: doris
+roleRef:
+  kind: Role
+  name: doris-fe-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# -----------------------------------------------------------------------------
+# RBAC - BE 角色绑定
+# -----------------------------------------------------------------------------
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: doris-be-role
+  namespace: doris
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/component: be
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/status"]
+    verbs: ["update", "patch"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch"]
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: doris-be-rolebinding
+  namespace: doris
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/component: be
+subjects:
+  - kind: ServiceAccount
+    name: doris-be
+    namespace: doris
+roleRef:
+  kind: Role
+  name: doris-be-role
+  apiGroup: rbac.authorization.k8s.io

@@ -1,0 +1,222 @@
+# =============================================================================
+# NetworkPolicy (网络策略) - 组件间访问控制
+# =============================================================================
+#
+# 什么是 NetworkPolicy？
+# - K8s 的网络隔离机制
+# - 类似于防火墙规则
+# - 控制哪些 Pod 可以相互通信
+#
+# 为什么需要 NetworkPolicy？
+# - 最小权限原则：只开放必要的通信
+# - 防止横向攻击：限制攻击者访问其他组件
+# - 合规要求：满足安全审计要求
+#
+# 工作原理：
+# - 默认情况下，K8s 集群内所有 Pod 可以相互通信
+# - NetworkPolicy 是白名单机制
+# - 未被允许的流量会被阻止
+#
+# 前提条件：
+# - 网络插件必须支持 NetworkPolicy（如 Calico、Cilium）
+# - GKE 默认使用 Google VPC 网络，支持 NetworkPolicy
+#
+# 注意事项：
+# - 需要为每个需要隔离的组件创建 NetworkPolicy
+# - 规则是累加的
+# - 没有匹配任何规则的 Pod 无法被访问
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# FE 网络策略
+# -----------------------------------------------------------------------------
+# FE 需要被访问的端口：
+# - 8030: HTTP（Web UI、健康检查）
+# - 9030: MySQL 协议（SQL 连接）
+# - 9010: FE 之间同步（FE 之间通信）
+#
+# 允许访问的来源：
+# - BE 组件（BE 需要查询 FE 元数据）
+# - 其他 FE 组件（FE 之间同步）
+# - Kube-system DNS（健康检查需要）
+# - 外部用户（通过 Service/LoadBalancer）
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: doris-fe-network-policy
+  namespace: doris
+spec:
+  # podSelector: 选择应用此策略的 Pod
+  # 匹配标签 app.kubernetes.io/component=fe 的 Pod
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: fe
+
+  # policyTypes: 策略类型
+  # - Ingress: 入站流量规则
+  # - Egress: 出站流量规则
+  policyTypes:
+    - Ingress
+    - Egress
+
+  # Ingress: 入站流量规则
+  ingress:
+    # 允许 BE 访问 FE 的 9030 端口
+    # BE 需要连接 FE 执行查询
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: be
+      ports:
+        - protocol: TCP
+          port: 9030
+
+    # 允许 FE 之间相互访问 9010 端口
+    # FE 之间需要同步元数据
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: fe
+      ports:
+        - protocol: TCP
+          port: 9010
+
+    # 允许健康检查
+    # KubeDNS 需要访问 FE 进行健康探测
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: TCP
+          port: 8030
+
+  # Egress: 出站流量规则
+  egress:
+    # 允许 DNS 查询
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+
+    # 允许访问外部 API（Kubernetes API）
+    # FE 可能需要调用 K8s API
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 443
+
+---
+# =============================================================================
+# BE 网络策略
+# =============================================================================
+# BE 需要被访问的端口：
+# - 8040: HTTP（Web UI、健康检查）
+# - 9050: 心跳（BE 向 FE 报告状态）
+# - 8060: Arrow Flight SQL（高速数据传输）
+#
+# 允许访问的来源：
+# - FE 组件（FE 调度查询到 BE）
+# - 其他 BE 组件（BE 之间数据交换）
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: doris-be-network-policy
+  namespace: doris
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: be
+
+  policyTypes:
+    - Ingress
+    - Egress
+
+  ingress:
+    # 允许 FE 访问 BE 的所有端口
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: fe
+      ports:
+        - protocol: TCP
+          port: 9050  # 心跳端口
+        - protocol: TCP
+          port: 8040  # HTTP 端口
+        - protocol: TCP
+          port: 8060  # Arrow Flight
+
+    # 允许 BE 之间相互访问
+    # 数据交换和副本同步
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: be
+      ports:
+        - protocol: TCP
+          port: 9050
+        - protocol: TCP
+          port: 8040
+        - protocol: TCP
+          port: 8060
+
+  egress:
+    # 允许 DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+
+    # 允许访问外部服务
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 443
+
+# =============================================================================
+# 网络策略配置参考
+# =============================================================================
+#
+# 最小权限原则：
+# - 只开放必要的端口
+# - 只允许必要的来源访问
+#
+# 端口用途汇总：
+# | 端口 | 用途 | 允许来源 |
+# |------|------|----------|
+# | 8030 | FE HTTP | K8s DNS, 外部用户 |
+# | 9030 | FE MySQL | BE, 外部用户 |
+# | 9010 | FE 复制 | 其他 FE |
+# | 8040 | BE HTTP | FE |
+# | 9050 | BE 心跳 | FE, 其他 BE |
+# | 8060 | Arrow Flight | FE |
+#
+# 启用网络策略：
+# 1. 确保网络插件支持（Calico/Cilium）
+# 2. 创建 NetworkPolicy 资源
+# 3. 测试应用正常通信
+#
+# 调试：
+# - 使用 kubectl exec 进入 Pod
+# - 使用 telnet/nc 测试端口连通性
+# - 检查 NetworkPolicy 是否正确应用
+# =============================================================================

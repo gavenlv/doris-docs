@@ -1,10 +1,45 @@
+# =============================================================================
+# Kubernetes 命名空间和私有镜像仓库配置
+# =============================================================================
+#
+# 本文件用途：
+# 1. 创建 Doris 命名空间
+# 2. 配置私有镜像仓库认证（用于拉取私有镜像）
+#
+# 何时使用：
+# - 使用私有镜像仓库时
+# - 如公司内部的 Harbor、Nexus
+# =============================================================================
+
 apiVersion: v1
 kind: Namespace
 metadata:
   name: doris
   labels:
     name: doris
+
 ---
+# =============================================================================
+# Secret: 私有镜像仓库认证
+# =============================================================================
+#
+# 为什么要配置这个？
+# - K8s 拉取私有镜像需要认证
+# - Secret 存储镜像仓库的用户名密码
+#
+# Secret 内容：
+# - type: kubernetes.io/dockerconfigjson
+# - data: Base64 编码的 Docker config JSON
+#
+# 如何生成？
+# 1. 本地登录镜像仓库: docker login your-registry.com
+# 2. 查看认证信息: cat ~/.docker/config.json
+# 3. Base64 编码后填入
+#
+# 注意：示例中的密码是 Base64 编码的 "admin:adminadmin"
+# 生产环境请替换为真实的认证信息
+# =============================================================================
+
 apiVersion: v1
 kind: Secret
 metadata:
@@ -12,5 +47,9 @@ metadata:
   namespace: doris
 type: kubernetes.io/dockerconfigjson
 data:
-  # Base64 encoded: {"auths":{"nexus.company.com:8082":{"username":"admin","password":"adminadmin","auth":"YWRtaW46YWRtaW5hZG1pbg=="}}}
+  # Base64 编码格式的 Docker config JSON
+  # 格式: {"auths":{"your-registry.com":{"username":"user","password":"pass","auth":"base64(user:pass)"}}}
+  #
+  # 示例（已解码）:
+  # {"auths":{"nexus.company.com:8082":{"username":"admin","password":"adminadmin","auth":"YWRtaW46YWRtaW5hZG1pbg=="}}}
   .dockerconfigjson: eyJhdXRocyI6eyJueHV4LmNvbXBhbnkuY29tOjgwODIiOnsidXNlcm5hbWUiOiJhZG1pbiIsInBhc3N3b3JkIjoiYWRtaW5hZG1pbiIsImF1dGgiOiJZMTl0Y21GMGNTMXZjbU14WldNNmN5NXNhVzVwY21GMGFXOXVjeTgrIn19fQ==

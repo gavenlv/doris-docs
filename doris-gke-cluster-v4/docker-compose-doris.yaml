@@ -1,44 +1,103 @@
+# =============================================================================
+# Docker Compose - Doris 集群（官方镜像版）
+# =============================================================================
+#
+# 用途：使用官方 Apache Doris 镜像启动本地集群
+#
+# 与 docker-compose-local.yaml 的区别：
+# - 使用官方公共镜像（无需构建）
+# - 适合快速验证或学习
+#
+# 端口说明：
+# | 端口 | 服务 | 说明 |
+# |------|------|------|
+# | 8030 | FE | Web UI、监控 |
+# | 9030 | FE | MySQL 协议（连接入口）|
+# | 8040 | BE | Web UI、监控 |
+# | 9050 | BE | 心跳（内部通信）|
+# | 8060 | BE | Arrow Flight SQL |
+# =============================================================================
+
 version: '3.8'
 
 services:
+  # ===========================================================================
+  # FE (Frontend) 服务
+  # ===========================================================================
   fe:
+    # 官方镜像
     image: apache/doris:fe-3.1.4
+
+    # 容器名称（方便查看）
     container_name: doris-fe
+
+    # 主机名
     hostname: fe
+
+    # 环境变量
     environment:
+      # FE 集群配置
+      # 格式：fe名称:主机:端口
       - FE_SERVERS=fe1:127.0.0.1:9010
+
+    # 端口映射：宿主机端口:容器端口
     ports:
-      - "8030:8030"
-      - "9030:9030"
+      - "8030:8030"  # FE HTTP
+      - "9030:9030"  # FE MySQL
+
+    # 卷挂载：持久化数据
     volumes:
+      # FE 元数据（表结构、用户信息等）
       - fe_data:/opt/doris/fe/doris-meta
+      # FE 日志
       - fe_log:/opt/doris/fe/log
+
+    # 健康检查
+    # 使用 curl 检查健康端点
     healthcheck:
       test: ["CMD", "bash", "-c", "curl -s http://127.0.0.1:8030/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 30s
+      interval: 10s          # 每 10 秒检查一次
+      timeout: 5s           # 超时时间
+      retries: 30           # 连续失败 30 次视为不健康
+      start_period: 30s     # 容器启动后 30 秒开始检查
 
+  # ===========================================================================
+  # BE (Backend) 服务
+  # ===========================================================================
   be:
     image: apache/doris:be-3.1.4
     container_name: doris-be
     hostname: be
+
     environment:
+      # BE 监听地址
       - BE_ADDR=127.0.0.1:9050
+
+      # FE 主机地址
+      # 单节点部署使用 127.0.0.1
       - FE_HOST=127.0.0.1
+
+      # FE MySQL 端口
       - FE_PORT=9030
+
     ports:
-      - "8040:8040"
-      - "9050:9050"
-      - "8060:8060"
+      - "8040:8040"  # BE HTTP
+      - "9050:9050"  # BE Heartbeat
+      - "8060:8060"  # BE Arrow Flight
+
     volumes:
+      # BE 数据存储
       - be_data:/opt/doris/be/storage
+      # BE 临时目录
       - be_tmp:/opt/doris/tmp
+      # BE 日志
       - be_log:/opt/doris/be/log
+
+    # 依赖：等待 FE 健康后再启动
     depends_on:
       fe:
         condition: service_healthy
+
     healthcheck:
       test: ["CMD", "bash", "-c", "curl -s http://127.0.0.1:8040/api/health"]
       interval: 10s
@@ -46,9 +105,41 @@ services:
       retries: 30
       start_period: 30s
 
+# =============================================================================
+# 卷定义
+# =============================================================================
+# 命名卷：Docker 管理，持久化存储
 volumes:
-  fe_data:
-  fe_log:
-  be_data:
-  be_tmp:
-  be_log:
+  fe_data:       # FE 元数据
+  fe_log:        # FE 日志
+  be_data:       # BE 数据
+  be_tmp:        # BE 临时文件
+  be_log:        # BE 日志
+
+# =============================================================================
+# 使用方法
+# =============================================================================
+#
+# 启动集群：
+# docker-compose -f docker-compose-doris.yaml up -d
+#
+# 查看日志：
+# docker-compose -f docker-compose-doris.yaml logs -f
+#
+# 查看容器：
+# docker-compose -f docker-compose-doris.yaml ps
+#
+# 连接 MySQL：
+# mysql -h127.0.0.1 -P9030 -uroot
+#
+# 访问 Web UI：
+# - FE: http://localhost:8030
+# - BE: http://localhost:8040
+#
+# 停止集群：
+# docker-compose -f docker-compose-doris.yaml down
+#
+# 清理数据：
+# docker-compose -f docker-compose-doris.yaml down -v
+#
+# =============================================================================

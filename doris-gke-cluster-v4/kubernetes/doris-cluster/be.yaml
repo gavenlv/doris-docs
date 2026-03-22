@@ -1,3 +1,22 @@
+# =============================================================================
+# Doris BE (Backend) Kubernetes 部署配置
+# =============================================================================
+#
+# 本文件包含：
+# 1. Service: BE 服务定义
+# 2. Deployment: BE 部署配置
+#
+# BE 组件作用：
+# - 存储实际数据
+# - 执行查询计算
+# - 数据压缩和 Compaction
+# - 向 FE 汇报状态
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Service: BE 服务
+# -----------------------------------------------------------------------------
+
 apiVersion: v1
 kind: Service
 metadata:
@@ -8,17 +27,27 @@ metadata:
     component: be
 spec:
   type: ClusterIP
+
   ports:
+    # HTTP 端口：Web UI、监控
     - port: 8040
       name: be-http
+    # 心跳端口：向 FE 汇报状态
     - port: 9050
       name: be-heartbeat
+    # Arrow Flight SQL 端口：高速数据传输
     - port: 8060
       name: be-arrow-flight
+
   selector:
     app: doris
     component: be
+
 ---
+# =============================================================================
+# Deployment: BE 部署
+# =============================================================================
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -28,11 +57,14 @@ metadata:
     app: doris
     component: be
 spec:
+  # 副本数：生产建议至少 3（数据分片冗余）
   replicas: 6
+
   selector:
     matchLabels:
       app: doris
       component: be
+
   template:
     metadata:
       labels:
@@ -41,19 +73,25 @@ spec:
     spec:
       imagePullSecrets:
         - name: nexus-secret
+
       initContainers:
+        # 修复目录权限
         - name: fix-permissions
           image: busybox:latest
-          command: ["sh", "-c", "chown -R 1000:1000 /opt/doris"]
+          command:
+            - sh
+            - -c
+            - "chown -R 1000:1000 /opt/doris"
           volumeMounts:
             - name: data
               mountPath: /opt/doris
-            - name: be-tmp
-              mountPath: /opt/doris/tmp
+
       containers:
         - name: be
+          # 镜像地址（私有仓库）
           image: nexus.company.com:8082/doris/be:2.1.7-secure
           imagePullPolicy: Always
+
           ports:
             - containerPort: 8040
               name: be-http
@@ -61,13 +99,23 @@ spec:
               name: be-heartbeat
             - containerPort: 8060
               name: be-arrow-flight
+
           env:
+            # BE_ADDR: 当前 BE 实例地址
+            # 0.0.0.0 表示监听所有网卡
             - name: BE_ADDR
               value: "0.0.0.0:9050"
+
+            # FE_HOST: FE 服务地址（K8s 内部 DNS）
+            # 格式：service-name.namespace.svc.cluster.local
             - name: FE_HOST
               value: "doris-fe.doris.svc.cluster.local"
+
+            # FE_PORT: FE MySQL 端口
             - name: FE_PORT
               value: "9030"
+
+          # BE 通常需要更多资源（数据处理）
           resources:
             requests:
               cpu: "8"
@@ -75,13 +123,19 @@ spec:
             limits:
               cpu: "16"
               memory: "64Gi"
+
           volumeMounts:
+            # 数据目录
             - name: data
               mountPath: /opt/doris/be/storage
+            # 临时目录（导入等操作使用）
             - name: be-tmp
               mountPath: /opt/doris/tmp
+            # 日志目录
             - name: log
               mountPath: /opt/doris/be/log
+
+          # 健康检查
           startupProbe:
             httpGet:
               path: /api/health
@@ -89,22 +143,55 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
+
           readinessProbe:
             httpGet:
               path: /api/health
               port: 8040
             initialDelaySeconds: 30
             periodSeconds: 10
+            timeoutSeconds: 5
+
           livenessProbe:
             httpGet:
               path: /api/health
               port: 8040
             initialDelaySeconds: 60
             periodSeconds: 30
+            timeoutSeconds: 5
+
       volumes:
+        # 数据卷（生产环境应使用 PVC）
         - name: data
           emptyDir: {}
+        # 临时目录
         - name: be-tmp
           emptyDir: {}
+        # 日志卷
         - name: log
           emptyDir: {}
+
+# =============================================================================
+# 配置参考
+# =============================================================================
+#
+# 端口说明：
+# | 端口 | 协议 | 用途 | 访问来源 |
+# |------|------|------|---------|
+# | 8040 | HTTP | Web UI、监控 | 浏览器、Prometheus |
+# | 9050 | Thrift | 心跳汇报 | FE |
+# | 8060 | Arrow Flight | 数据交换 | FE、外部表 |
+#
+# 资源规划：
+# | 环境 | CPU | 内存 | 磁盘 | 副本数 |
+# |------|-----|------|------|--------|
+# | 开发 | 2C | 8Gi | 50Gi | 1 |
+# | 测试 | 4C | 16Gi | 200Gi | 1 |
+# | 生产 | 16C | 64Gi | 500Gi+ | 3-6 |
+#
+# 与 FE 的主要区别：
+# - BE 需要更多 CPU 和内存（查询计算）
+# - BE 需要更大存储空间（数据存储）
+# - BE 副本数通常比 FE 多（数据分片）
+#
+# =============================================================================

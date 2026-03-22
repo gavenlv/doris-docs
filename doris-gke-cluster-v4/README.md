@@ -1,118 +1,108 @@
-# Doris GKE Cluster - Security Hardened Image Build (Version 2.1.7)
+# Doris Kubernetes 部署项目
 
-## Overview
+本项目包含在 Kubernetes 环境中部署 Apache Doris 集群的配置，支持本地开发测试和生产环境。
 
-This project builds security-hardened Apache Doris 2.1.7 images from Ubuntu base images, with integrated security scanning and vulnerability remediation.
-
-## Important Note on Version
-
-**Doris 4.0.4 only has source code packages, no binary packages available.**
-
-This project uses **Doris 2.1.7** (latest stable version with binary packages):
-
-| Version | Package | Download |
-|---------|---------|----------|
-| **2.1.7** | Binary (2.1GB) | ✅ Available |
-| **4.0.4** | Source only | ❌ No binary |
-
-## Version Information
-
-- **Doris**: 2.1.7
-- **Package**: `apache-doris-2.1.7-bin-x64.tar.gz`
-- **Download**: https://apache-doris-releases.oss-accelerate.aliyuncs.com/apache-doris-2.1.7-bin-x64.tar.gz
-
-## Quick Start
-
-### Option 1: One-Click Local Setup (Recommended)
-
-```powershell
-# Windows - Run in project root
-.\verify.bat
-```
-
-### Option 2: Step-by-Step
-
-1. Download Doris 2.1.7 package:
-```powershell
-mkdir offline-packages
-Invoke-WebRequest -Uri "https://apache-doris-releases.oss-accelerate.aliyuncs.com/apache-doris-2.1.7-bin-x64.tar.gz" -OutFile "offline-packages\apache-doris-2.1.7-bin-x64.tar.gz"
-```
-
-2. Build images:
-```bash
-cd docker/fe && docker build --build-arg DORIS_VERSION=2.1.7 -t doris-fe:2.1.7 .
-cd docker/be && docker build --build-arg DORIS_VERSION=2.1.7 -t doris-be:2.1.7 .
-```
-
-3. Start local cluster:
-```bash
-docker-compose -f docker-compose-local.yaml up -d
-```
-
-## Directory Structure
+## 目录结构
 
 ```
 doris-gke-cluster-v4/
-├── docker/
-│   ├── fe/Dockerfile           # FE Image (Ubuntu 22.04)
-│   ├── be/Dockerfile           # BE Image (Ubuntu 22.04)
-│   └── fdb/Dockerfile          # FoundationDB Image
-├── docker-compose.yaml         # Nexus + Test Containers
-├── docker-compose-local.yaml   # Local Doris Cluster (FE + BE)
-├── scripts/                    # Build scripts
-├── kubernetes/                 # K8s configurations
-├── configs/                   # Build configs
-├── docs/                       # Documentation
-├── offline-packages/           # Downloaded packages
-└── README.md
+├── k8s-local/                    # 本地 Docker Desktop K8s 配置
+│   ├── 00-namespace.yaml         # 命名空间定义
+│   ├── operator.yaml             # Doris Operator 部署
+│   ├── doriscluster.yaml         # DorisCluster 资源定义
+│   ├── configmap.yaml            # FE/BE 配置（可选）
+│   ├── secret.yaml               # 密钥配置
+│   ├── deploy.sh                 # 部署脚本
+│   ├── undeploy.sh               # 卸载脚本
+│   └── README.md                 # 详细部署文档
+│
+├── k8s-gke/                      # Google GKE 生产配置
+│   ├── 00-namespace.yaml         # 命名空间 + Regional PD Storage
+│   ├── configmap.yaml            # FE 生产配置
+│   ├── configmap-be.yaml         # BE 生产配置
+│   ├── doriscluster.yaml         # 生产级 DorisCluster
+│   ├── services.yaml             # Ingress + BackendConfig
+│   ├── hpa.yaml                  # 自动扩缩容
+│   ├── network-policy.yaml       # 网络策略
+│   ├── monitoring.yaml          # Prometheus 监控
+│   ├── backup.yaml               # 定时备份
+│   ├── secret.yaml               # Secret 配置
+│   ├── deploy.sh                 # 部署脚本
+│   ├── undeploy.sh               # 卸载脚本
+│   └── README.md
+│
+├── configs/                      # 配置文件
+│   ├── build-config.yaml
+│   └── nexus-config.yaml
+│
+├── DEBUG-LOCAL.md               # 本地部署调试记录
+└── QUICK-START.md               # 快速开始
 ```
 
-## Documentation
+## 快速开始
 
-- [Quick Start](QUICK-START.md)
-- [Download Guide](DOWNLOAD-GUIDE.md)
-- [Local Verification](docs/LOCAL-VERIFY.md)
-- [Security Hardening](docs/SECURITY-HARDENING.md)
-- [Deployment Guide](docs/DEPLOYMENT-GUIDE.md)
+### 本地开发 (Docker Desktop)
 
-## Local Development
-
-Start a local Doris cluster for testing:
+详见 [k8s-local/README.md](./k8s-local/README.md)
 
 ```bash
-# Start FE + BE
-docker-compose -f docker-compose-local.yaml up -d
+cd k8s-local
 
-# Check status
-docker-compose -f docker-compose-local.yaml ps
+# 部署 Operator
+kubectl apply -f operator.yaml
 
-# View logs
-docker-compose -f docker-compose-local.yaml logs -f
+# 部署 DorisCluster
+kubectl apply -f doriscluster.yaml
 
-# Connect to Doris
-mysql -h127.0.0.1 -P9030 -uroot
-
-# Stop cluster
-docker-compose -f docker-compose-local.yaml down
+# 查看状态
+kubectl get pods -n doris
 ```
 
-## Access Points
+### 生产部署 (GKE)
 
-| Service | URL | Description |
-|---------|-----|-------------|
-| FE Web UI | http://localhost:8030 | Frontend Admin |
-| BE Web UI | http://localhost:8040 | Backend Admin |
-| MySQL | mysql -h127.0.0.1 -P9030 -uroot | SQL Client |
+详见 [k8s-gke/README.md](./k8s-gke/README.md)
 
-## Security Features
+```bash
+export PROJECT_ID="your-gcp-project"
+export CLUSTER_NAME="doris-cluster"
+export REGION="us-central1"
 
-1. **Multi-stage Build** - Runtime images contain no build tools
-2. **Non-root User** - All containers run as non-root
-3. **Minimal Dependencies** - Only runtime libraries included
-4. **Trivy Scanning** - Full vulnerability scan before deployment
+cd k8s-gke
+./deploy.sh
+```
 
-## References
+## 版本信息
 
-- [Doris Official Documentation](https://doris.apache.org/docs/)
-- [Doris GitHub](https://github.com/apache/doris)
-- [Apache Doris Downloads](https://doris.apache.org/zh-CN/download)
+| 组件 | 版本 |
+|------|------|
+| Doris | 3.1.4 |
+| Doris Operator | 25.8.0 |
+| Kubernetes | 1.19+ |
+
+## 本地部署要点
+
+1. **无需 MinIO**: 开发环境使用 emptyDir 存储
+2. **NodePort 访问**: Docker Desktop 使用 NodePort 而非 LoadBalancer
+3. **1 副本**: 开发环境 FE/BE 各 1 副本节省资源
+4. **默认配置**: 使用镜像内置配置，避免 ConfigMap 只读问题
+
+## 故障排除
+
+详见 [DEBUG-LOCAL.md](./DEBUG-LOCAL.md)
+
+```bash
+# 检查 pods
+kubectl get pods -n doris
+
+# 查看日志
+kubectl logs -n doris <pod-name>
+
+# 查看事件
+kubectl get events -n doris --sort-by='.lastTimestamp'
+```
+
+## 参考
+
+- [Doris Operator](https://github.com/apache/doris-operator)
+- [Doris 官方文档](https://doris.apache.org)
+- [GKE 文档](https://cloud.google.com/kubernetes-engine/docs)

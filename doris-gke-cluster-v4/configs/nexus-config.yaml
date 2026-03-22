@@ -1,37 +1,98 @@
-# Nexus Repository Configuration
-# Doris Version: 2.1.7
+# =============================================================================
+# Nexus 私有镜像仓库配置
+# =============================================================================
+#
+# 用途：配置 Nexus 仓库地址、认证信息和 Doris 集群参数
+#
+# 什么是 Nexus？
+# - Sonatype Nexus Repository Manager
+# - 私有镜像仓库，用于存储和管理 Docker 镜像
+# - 支持 Docker、Helm、Maven 等多种仓库类型
+#
+# 为什么使用私有仓库？
+# - 安全：镜像不公开
+# - 速度：内网访问更快
+# - 版本控制：统一管理镜像版本
+# =============================================================================
 
+# Nexus 服务器配置
 nexus:
+  # Nexus 主机地址
   host: "nexus.company.com"
+
+  # Nexus 端口
   port: 8082
 
-  # Repository names
+  # 仓库配置
   repositories:
+    # Docker 代理仓库（从 Docker Hub 拉取）
     docker: "doris-docker"
+
+    # Docker 托管仓库（推送本地镜像）
     docker-hosted: "doris-docker-hosted"
 
-  # Image tags
+  # 镜像标签
+  # 完整镜像地址 = host:port/repository:tag
   tags:
     fe: "nexus.company.com:8082/doris/fe:2.1.7-secure"
     be: "nexus.company.com:8082/doris/be:2.1.7-secure"
 
-  # Authentication
+  # 认证信息
+  # 注意：生产环境应使用环境变量，不要明文存储密码
   auth:
     username: "admin"
-    # Use environment variable for password in production
+    # 密码：支持环境变量引用
+    # 格式：${ENV_VAR:-default_value}
     password: "${NEXUS_PASSWORD:-adminadmin}"
 
-# Doris Cluster Configuration
+# Doris 集群配置
 doris:
+  # Doris 版本
   version: "2.1.7"
+
+  # FE 配置
   fe:
+    # 副本数：生产建议 3
     replicas: 3
+
+    # 资源配置
     resources:
       cpu: "4"
       memory: "8Gi"
+
+  # BE 配置
   be:
+    # 副本数：生产建议 3+
     replicas: 6
+
     resources:
       cpu: "8"
       memory: "32Gi"
+
+      # 存储配置（PVC 大小）
       storage: "100Gi"
+
+# =============================================================================
+# Nexus 配置说明
+# =============================================================================
+#
+# 首次使用 Nexus：
+# 1. 访问 http://nexus.company.com:8082
+# 2. 使用 admin/admin123 登录
+# 3. 创建 Docker 仓库
+# 4. 配置 Docker registry URL
+#
+# Docker 登录 Nexus：
+# docker login nexus.company.com:8082 -u admin
+#
+# 推送镜像到 Nexus：
+# docker tag doris-fe:2.1.7 nexus.company.com:8082/doris/fe:2.1.7-secure
+# docker push nexus.company.com:8082/doris/fe:2.1.7-secure
+#
+# K8s 使用私有镜像：
+# 1. 创建 Secret：kubectl create secret docker-registry nexus-secret
+# 2. 在 Pod spec 中引用：
+#    imagePullSecrets:
+#      - name: nexus-secret
+#
+# =============================================================================

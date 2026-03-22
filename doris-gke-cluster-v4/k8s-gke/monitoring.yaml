@@ -1,0 +1,239 @@
+# =============================================================================
+# Prometheus 监控配置
+# =============================================================================
+#
+# 什么是 Prometheus + ServiceMonitor？
+# - Prometheus: 开源监控系统，采集和存储指标
+# - ServiceMonitor: Prometheus Operator 的 CRD
+# - 自动发现 K8s Service 并采集监控指标
+#
+# Doris 监控指标：
+# - FE: 查询延迟、连接数、元数据操作
+# - BE: 写入速度、查询性能、存储使用
+#
+# 前置条件：
+# - 已安装 Prometheus Operator
+# - 或手动安装 Prometheus Server
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# ServiceMonitor: FE 监控
+# -----------------------------------------------------------------------------
+# ServiceMonitor 作用：
+# - 自动发现 Service
+# - 配置 Prometheus 抓取地址
+# - 定义抓取间隔和指标路径
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: doris-fe-monitor
+  namespace: doris
+  labels:
+    app: doris
+    # release 标签用于 Prometheus 选择此 ServiceMonitor
+    # 必须与 Prometheus 配置中的 serviceMonitorSelector 匹配
+    release: prometheus
+spec:
+  # jobLabel: 将某个 label 的值作为 job name
+  jobLabel: doris-fe
+
+  # selector: 选择要监控的 Service
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: fe
+
+  # namespaceSelector: 在哪些命名空间中查找 Service
+  namespaceSelector:
+    matchNames:
+      - doris
+
+  # endpoints: 抓取端点配置
+  endpoints:
+    - port: fe-http           # Service 的端口名称
+      path: /metrics          # 指标路径
+      interval: 15s           # 抓取间隔
+      # 可选：指标 TLS 配置
+      # scheme: https
+      # tlsConfig:
+      #   caFile: /etc/prometheus/certs/ca.crt
+
+---
+# -----------------------------------------------------------------------------
+# ServiceMonitor: BE 监控
+# -----------------------------------------------------------------------------
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: doris-be-monitor
+  namespace: doris
+  labels:
+    app: doris
+    release: prometheus
+spec:
+  jobLabel: doris-be
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: be
+  namespaceSelector:
+    matchNames:
+      - doris
+  endpoints:
+    - port: be-http
+      path: /metrics
+      interval: 15s
+
+---
+# =============================================================================
+# PrometheusRule: 告警规则
+# =============================================================================
+#
+# 什么是 PrometheusRule？
+# - 定义告警条件
+# - 当条件满足时生成告警
+# - 告警发送到 AlertManager
+#
+# 告警状态：
+# - Pending: 条件满足，等待评估时间
+# - Firing: 评估通过，告警触发
+# =============================================================================
+
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: doris-alerts
+  namespace: doris
+  labels:
+    app: doris
+    release: prometheus
+spec:
+  groups:
+    # group 名称，在一个 group 内名称必须唯一
+    - name: doris-alerts
+      rules:
+        # ---------------------------------------------------------------------
+        # FE 告警
+        # ---------------------------------------------------------------------
+
+        # FE High CPU - FE CPU 使用率过高
+        - alert: DorisFEHighCPU
+          expr: rate(process_cpu_seconds_total{service_type="fe"}[5m]) > 0.8
+          for: 5m              # 持续 5 分钟触发
+          labels:
+            severity: warning
+          annotations:
+            summary: "Doris FE High CPU Usage"
+            description: "Doris FE {{ $labels.instance }} CPU usage is above 80%"
+
+        # FE High Memory - FE 内存使用率过高
+        - alert: DorisFEHighMemory
+          expr: process_resident_memory_bytes{service_type="fe"} / process_max_memory_bytes{service_type="fe"} > 0.9
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Doris FE High Memory Usage"
+            description: "Doris FE {{ $labels.instance }} memory usage is above 90%"
+
+        # FE Down - FE 服务不可用
+        - alert: DorisFEDown
+          expr: up{service_type="fe"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Doris FE Down"
+            description: "Doris FE {{ $labels.instance }} is down"
+
+        # ---------------------------------------------------------------------
+        # BE 告警
+        # ---------------------------------------------------------------------
+
+        # BE High CPU
+        - alert: DorisBEHighCPU
+          expr: rate(process_cpu_seconds_total{service_type="be"}[5m]) > 0.8
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Doris BE High CPU Usage"
+            description: "Doris BE {{ $labels.instance }} CPU usage is above 80%"
+
+        # BE High Memory
+        - alert: DorisBEHighMemory
+          expr: process_resident_memory_bytes{service_type="be"} / process_max_memory_bytes{service_type="be"} > 0.9
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Doris BE High Memory Usage"
+            description: "Doris BE {{ $labels.instance }} memory usage is above 90%"
+
+        # BE Down
+        - alert: DorisBEDown
+          expr: up{service_type="be"} == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Doris BE Down"
+            description: "Doris BE {{ $labels.instance }} is down"
+
+        # ---------------------------------------------------------------------
+        # 数据健康告警
+        # ---------------------------------------------------------------------
+
+        # Tablet Errors - Tablet 错误过多
+        - alert: DorisTabletFailed
+          expr: doris_tablet_err_count > 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Doris Tablet Errors"
+            description: "Doris has {{ $value }} tablet errors"
+
+        # Disk Full - 磁盘空间不足
+        - alert: DorisDiskFull
+          expr: (1 - doris_be_disks_avail_capacity / doris_be_disks_total_capacity) > 0.9
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Doris BE Disk Almost Full"
+            description: "Doris BE {{ $labels.instance }} disk usage is above 90%"
+
+        # Query Timeout - 查询超时过多
+        - alert: DorisQueryTimeout
+          expr: rate(doris_fe_query_err_rate[5m]) > 0.1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Doris FE Query Errors"
+            description: "Doris FE {{ $labels.instance }} query error rate is above 10%"
+
+# =============================================================================
+# 告警配置参考
+# =============================================================================
+#
+# 告警级别：
+# - critical: 严重，影响服务，需要立即处理
+# - warning: 警告，可能影响服务，需要关注
+# - info: 信息，用于通知
+#
+# 常用指标：
+# | 指标 | 说明 | 告警阈值 |
+# |------|------|---------|
+# | process_cpu_seconds_total | CPU 使用率 | > 80% |
+# | process_resident_memory_bytes | 内存使用 | > 90% |
+# | doris_be_disks_avail_capacity | 磁盘可用 | < 10% |
+# | doris_tablet_err_count | Tablet 错误数 | > 0 |
+#
+# 告警通知方式：
+# - Email
+# - Slack
+# - PagerDuty
+# - 自定义 Webhook
+# =============================================================================

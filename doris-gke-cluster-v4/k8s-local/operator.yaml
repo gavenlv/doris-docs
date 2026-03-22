@@ -1,0 +1,283 @@
+# =============================================================================
+# Doris Operator 离线部署配置 (本地 Docker Desktop Kubernetes)
+# =============================================================================
+# 作用: 在没有外部网络访问的环境中部署 Doris Operator
+# 来源: 基于 apache/doris-operator 官方配置修改
+# 版本: 25.8.0
+# =============================================================================
+
+---
+# 1. Doris Operator Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: doris-operator-system
+  labels:
+    app.kubernetes.io/name: doris-operator
+    app.kubernetes.io/version: "25.8.0"
+
+---
+# 2. Operator ServiceAccount
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: doris-operator
+  namespace: doris-operator-system
+  labels:
+    app.kubernetes.io/name: doris-operator
+    app.kubernetes.io/version: "25.8.0"
+
+---
+# 3. ClusterRole - 完整权限 (包含 apps 和 doris.selectdb.com)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: doris-operator
+  labels:
+    app.kubernetes.io/name: doris-operator
+    app.kubernetes.io/version: "25.8.0"
+rules:
+# APIExtensions - CRD
+- apiGroups: ["apiextensions.k8s.io"]
+  resources: ["customresourcedefinitions"]
+  verbs: ["get", "list", "watch"]
+
+# DorisCluster CRD - 核心资源
+- apiGroups: ["doris.selectdb.com"]
+  resources: ["dorisclusters"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["doris.selectdb.com"]
+  resources: ["dorisclusters/status"]
+  verbs: ["get", "update", "patch"]
+- apiGroups: ["doris.selectdb.com"]
+  resources: ["dorisclusters/finalizers"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Apps API Group - StatefulSets (核心！)
+- apiGroups: ["apps"]
+  resources: ["statefulsets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["statefulsets/status"]
+  verbs: ["get", "watch"]
+- apiGroups: ["apps"]
+  resources: ["statefulsets/finalizers"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["deployments/status"]
+  verbs: ["get", "watch"]
+- apiGroups: ["apps"]
+  resources: ["replicasets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["replicasets/status"]
+  verbs: ["get", "watch"]
+
+# Core API Group
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["pods/status"]
+  verbs: ["get", "watch", "patch"]
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["create"]
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get"]
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["services/status"]
+  verbs: ["get", "watch"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["configmaps/status"]
+  verbs: ["get", "watch"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims/status"]
+  verbs: ["get", "watch"]
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["endpoints"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["serviceaccounts"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Storage API Group
+- apiGroups: ["storage.k8s.io"]
+  resources: ["storageclasses"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["storage.k8s.io"]
+  resources: ["csidrivers"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["storage.k8s.io"]
+  resources: ["csinodes"]
+  verbs: ["get", "list", "watch"]
+
+# Networking API Group
+- apiGroups: ["networking.k8s.io"]
+  resources: ["ingresses"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["ingresses/status"]
+  verbs: ["get", "watch"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["networkpolicies"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Autoscaling API Group
+- apiGroups: ["autoscaling"]
+  resources: ["horizontalpodautoscalers"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["autoscaling"]
+  resources: ["horizontalpodautoscalers/status"]
+  verbs: ["get", "watch"]
+
+# Policy API Group
+- apiGroups: ["policy"]
+  resources: ["poddisruptionbudgets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["policy"]
+  resources: ["poddisruptionbudgets/status"]
+  verbs: ["get", "watch"]
+
+# Batch API Group
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["batch"]
+  resources: ["cronjobs"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Coordination API Group
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Discovery API Group
+- apiGroups: ["discovery.k8s.io"]
+  resources: ["endpointslices"]
+  verbs: ["get", "list", "watch"]
+
+---
+# 4. ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: doris-operator
+  namespace: doris-operator-system
+  labels:
+    app.kubernetes.io/name: doris-operator
+    app.kubernetes.io/version: "25.8.0"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: doris-operator
+subjects:
+- kind: ServiceAccount
+  name: doris-operator
+  namespace: doris-operator-system
+
+---
+# 5. Operator Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: doris-operator
+  namespace: doris-operator-system
+  labels:
+    app.kubernetes.io/name: doris-operator
+    app.kubernetes.io/version: "25.8.0"
+    app.kubernetes.io/component: operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: doris-operator
+      app.kubernetes.io/version: "25.8.0"
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: doris-operator
+        app.kubernetes.io/version: "25.8.0"
+        app.kubernetes.io/component: operator
+    spec:
+      serviceAccountName: doris-operator
+      containers:
+      - name: operator
+        image: apache/doris:operator-25.8.0
+        imagePullPolicy: IfNotPresent
+        command:
+        - /dorisoperator
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        env:
+        - name: LOG_LEVEL
+          value: "1"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        ports:
+        - name: metrics
+          containerPort: 8080
+        - name: health
+          containerPort: 8081
+      tolerations:
+      - operator: Exists
+
+---
+# 6. Operator Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: doris-operator
+  namespace: doris-operator-system
+  labels:
+    app.kubernetes.io/name: doris-operator
+    app.kubernetes.io/version: "25.8.0"
+spec:
+  type: ClusterIP
+  ports:
+  - name: metrics
+    port: 8080
+    targetPort: 8080
+  selector:
+    app.kubernetes.io/name: doris-operator
+    app.kubernetes.io/version: "25.8.0"

@@ -1,31 +1,70 @@
-version: '3.8'
+# =============================================================================
+# Docker Compose - Nexus 私有仓库 + Doris 测试环境
+# =============================================================================
+#
+# 用途：
+# 1. 启动 Nexus 私有镜像仓库
+# 2. 测试构建的 Doris 镜像
+#
+# Nexus 是什么？
+# - Sonatype Nexus Repository Manager
+# - 私有镜像仓库，用于存储 Docker 镜像
+# - 支持代理、托管等多种仓库类型
+#
+# 端口说明：
+# - 8081: Nexus Web UI
+# - 8082: Docker Hosted Repository（HTTPS）
+# =============================================================================
+
+version: '3.8'  # Docker Compose 文件版本
 
 services:
+  # ===========================================================================
   # Nexus3 私有仓库
+  # ===========================================================================
   nexus:
+    # 镜像：使用官方 Nexus3 镜像
     image: sonatype/nexus3:latest
     container_name: doris-nexus
+
+    # 端口映射
     ports:
-      - "8081:8081"      # Nexus Web UI
-      - "8082:8082"      # Docker Hosted Repository
+      - "8081:8081"  # Nexus Web UI（管理界面）
+      - "8082:8082"  # Docker Hosted Repository（镜像仓库）
+
+    # 环境变量
     environment:
+      # JVM 内存参数
       - INSTALL4J_ADD_VM_PARAMS=-Xmx1024m
+      # 优先使用 IPv4
       - JAVA_OPTS=-Djava.net.preferIPv4Stack=true
+
+    # 卷挂载：持久化 Nexus 数据
     volumes:
+      # Nexus 数据卷（包含仓库配置和存储的镜像）
       - nexus-data:/nexus-data
+
+    # 网络：加入 doris-net 网络
     networks:
       - doris-net
 
-  # 可选: 验证镜像可以运行的测试容器
+  # ===========================================================================
+  # 测试容器：FE
+  # ===========================================================================
+  # 用于验证构建的 Doris FE 镜像
+  # 命令 sleep infinity 让容器保持运行
   test-fe:
-    image: doris-fe:2.1.7
+    image: doris-fe:2.1.7  # 本地构建的镜像
     container_name: doris-test-fe
-    command: ["sleep", "infinity"]
+    command: ["sleep", "infinity"]  # 保持容器运行
     networks:
       - doris-net
     depends_on:
-      - nexus
+      - nexus  # 等待 Nexus 启动
 
+  # ===========================================================================
+  # 测试容器：BE
+  # ===========================================================================
   test-be:
     image: doris-be:2.1.7
     container_name: doris-test-be
@@ -35,9 +74,51 @@ services:
     depends_on:
       - nexus
 
+# =============================================================================
+# 卷定义
+# =============================================================================
 volumes:
+  # Nexus 数据卷
+  # 挂载到容器的 /nexus-data 目录
+  # 数据持久化存储，容器删除后数据保留
   nexus-data:
 
+# =============================================================================
+# 网络定义
+# =============================================================================
 networks:
+  # 桥接网络：各容器可以相互通信
   doris-net:
     driver: bridge
+
+# =============================================================================
+# 使用方法
+# =============================================================================
+#
+# 1. 启动 Nexus
+#    docker-compose up -d nexus
+#
+# 2. 访问 Nexus Web UI
+#    http://localhost:8081
+#    默认账号：admin
+#    默认密码：admin123（首次登录需要修改）
+#
+# 3. 配置 Docker 仓库
+#    - 创建 Docker (Hosted) 仓库
+#    - 启用 Docker Bearer Token Realm
+#    - 配置 HTTPS（如需要）
+#
+# 4. 登录 Docker 仓库
+#    docker login localhost:8082 -u admin -p admin123
+#
+# 5. 推送镜像
+#    docker tag doris-fe:2.1.7 localhost:8082/doris/fe:2.1.7
+#    docker push localhost:8082/doris/fe:2.1.7
+#
+# 6. 测试镜像
+#    docker-compose up -d test-fe test-be
+#
+# 7. 清理
+#    docker-compose down
+#
+# =============================================================================

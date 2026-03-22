@@ -1,0 +1,460 @@
+# =============================================================================
+# DorisCluster CRD 配置 (GKE 生产版本 - 存储计算分离架构)
+# =============================================================================
+# 作用: 定义完整的 Doris 集群配置
+# 为什么需要: Doris Operator 通过 CRD 管理集群生命周期
+# 适用: GKE 生产环境，3FE + 3BE 高可用部署
+#
+# CRD 版本: doris.apache.com/v1
+# CRD 名称: DorisCluster
+#
+# 架构说明:
+#   GKE 生产架构特点:
+#   1. 存储计算分离: BE 仅做计算，数据存储在 GCS
+#   2. 高可用: 3 FE (Leader/Follower) + 3 BE 副本
+#   3. 弹性扩缩容: 支持 HPA 自动扩缩容
+#   4. 分区设计: 优化 50亿行 * 70列数据
+#
+# 性能指标:
+#   - 写入: 5分钟内完成 50亿行
+#   - 读取: 8秒内完成复杂查询
+#   - 大批次: 20+ 批次/天 (每批 > 1亿行)
+#   - 小批次: 1000+ 批次/天 (每批 < 1亿行)
+#
+# 存储分层:
+#   热数据: Local SSD (< 7 天)
+#   温数据: Regional PD (7-30 天)
+#   冷数据: GCS (> 30 天)
+# =============================================================================
+
+apiVersion: doris.apache.com/v1
+kind: DorisCluster
+metadata:
+  # 集群名称
+  name: doriscluster
+  # 所属命名空间
+  namespace: doris
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/managed-by: doris-operator
+    # 环境标签
+    environment: production
+    # 版本标签
+    doris version: "2.1"
+spec:
+  # ---------------------------------------------------------------------------
+  # FE 配置
+  # ---------------------------------------------------------------------------
+  feSpec:
+    # FE 副本数
+    # 说明: FE 节点数量
+    # 可选值: 1 (测试) / 3 (生产) / 5 (大规模生产)
+    # 生产建议: 3 (保证高可用)
+    # 注意: FE 采用 Raft 协议，需要奇数个节点！
+    replicas: 3
+
+    # 镜像配置
+    # 说明: Doris FE 镜像
+    # GKE 建议: 使用官方镜像或私有仓库镜像
+    image: apache/doris:2.1.5
+
+    # 资源限制
+    # 说明: Container 资源请求和限制
+    # 生产建议:
+    #   - CPU: 4-8 核 (根据查询并发调整)
+    #   - Memory: 8-16Gi (根据数据量调整)
+    # 注意: FE 元数据占用内存，建议 16Gi+
+    resources:
+      requests:
+        cpu: 4
+        memory: 16Gi
+      limits:
+        cpu: 8
+        memory: 32Gi
+
+    # 存储配置 - 关键！
+    # 说明: FE 元数据存储
+    # GKE 使用 Regional PD 保证高可用
+    # 注意: FE 元数据必须持久化存储！
+    storage:
+      # 存储类型
+      # 可选值:
+      #   - EmptyDir: 临时存储，不推荐生产使用
+      #   - StorageClass: 使用动态存储
+      #   - PVC: 使用预定义的 PVC
+      # 生产建议: StorageClass
+      storageClassName: doris-regional-storage
+      # 存储大小
+      # 说明: FE 元数据目录空间
+      # 默认: 100Gi
+      # 生产建议: 100-500Gi
+      # 注意: 元数据占用空间随表数量增长
+      capacity: 200Gi
+
+    # 配置映射
+    # 说明: 引用上面定义的 FE ConfigMap
+    configMapInfo:
+      configMapNamespace: doris
+      configMapName: fe-config
+      # 配置项文件名 (与 ConfigMap 中的 key 对应)
+      resolveKey: fe.conf
+
+    # Service 配置
+    # 说明: FE Service 类型
+    service:
+      type: ClusterIP
+      # 端口配置 (可选)
+      ports:
+        - name: query-port
+          port: 9030
+          targetPort: 9030
+        - name: http-port
+          port: 8030
+          targetPort: 8030
+        - name: rpc-port
+          port: 9010
+          targetPort: 9010
+
+    # 探针配置
+    # 说明: 健康检查和就绪检查
+    readinessProbe:
+      # 初始等待时间 (秒)
+      # 说明: Pod 启动后等待时间
+      # 默认: 30
+      # 生产建议: 30-60
+      initialDelaySeconds: 30
+      # 检查周期 (秒)
+      # 默认: 5
+      periodSeconds: 5
+      # 连续成功次数
+      # 默认: 3
+      # 生产建议: 3-5
+      successThreshold: 3
+      # 超时时间 (秒)
+      # 默认: 5
+      timeoutSeconds: 5
+
+    # 启动探针
+    # 说明: 检查 FE 是否启动完成
+    startupProbe:
+      # 初始等待时间 (秒)
+      # 说明: Pod 启动后等待时间
+      # 默认: 120
+      # 生产建议: 120-300 (FE 启动较慢)
+      # 注意: 5亿行数据导入场景 FE 启动可能需要更久
+      initialDelaySeconds: 120
+      periodSeconds: 10
+      # 连续失败次数
+      # 默认: 30
+      # 注意: 30 * 10 = 300 秒 = 5 分钟
+      failureThreshold: 30
+
+    # 亲和性配置
+    # 说明: Pod 调度策略
+    affinity:
+      # Pod 反亲和性
+      # 说明: 强制 Pod 分散到不同节点
+      # 可选值:
+      #   - NoSchedule: 硬限制
+      #   - PreferNoSchedule: 软限制
+      # 生产建议: PreferNoSchedule (保证高可用但不强制)
+      podAntiAffinity:
+        type: PreferNoSchedule
+      # 节点亲和性
+      # 说明: 限制 Pod 调度到特定节点
+      # GKE 建议: 使用节点池标签
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+                # 偏好 SSD 节点池
+                - key: node.kubernetes.io/gke-local-ssd
+                  operator: Exists
+
+    # 容忍配置
+    # 说明: 容忍节点污点
+    tolerations:
+      - key: "node.kubernetes.io/local-storage"
+        operator: "Exists"
+        effect: "NoSchedule"
+
+    # 环境变量
+    env:
+      - name: JAVA_OPTS
+        value: "-Xmx8g -Xms4g -XX:+UseG1GC"
+
+    # 注解
+    # 说明: Pod 注解
+    podManagementPolicy: Parallel
+    maxUnavailable: 1
+
+  # ---------------------------------------------------------------------------
+  # BE 配置
+  # ---------------------------------------------------------------------------
+  beSpec:
+    # BE 副本数
+    # 说明: BE 节点数量
+    # 可选值: 1 (测试) / 3 (生产) / N (大规模生产)
+    # 生产建议: 3-10 (根据数据量和查询并发调整)
+    # 注意: 50亿行数据建议至少 6 个 BE
+    replicas: 3
+
+    # 镜像配置
+    image: apache/doris:2.1.5
+
+    # 资源限制
+    # 说明: Container 资源请求和限制
+    # 生产建议:
+    #   - CPU: 8-16 核 (BE 是计算密集型)
+    #   - Memory: 32-64Gi (大内存提升缓存命中率)
+    #   - Ephemeral Storage: 100-500Gi (本地缓存)
+    # 注意: 50亿行 * 70列需要大资源！
+    resources:
+      requests:
+        cpu: 8
+        memory: 32Gi
+        ephemeral-storage: 200Gi
+      limits:
+        cpu: 16
+        memory: 64Gi
+        ephemeral-storage: 500Gi
+
+    # 存储配置 - 存储计算分离核心！
+    # 说明: BE 数据存储配置
+    # GKE 版本:
+    #   - 热数据: 本地 SSD 缓存
+    #   - 冷数据: GCS 对象存储
+    storage:
+      # 存储类型
+      # 可选值:
+      #   - EmptyDir: 临时存储 (测试)
+      #   - StorageClass: 动态存储
+      # 生产建议: doris-local-ssd (热数据)
+      storageClassName: doris-local-ssd
+      # 存储大小 (本地 SSD 容量)
+      # 说明: 本地 SSD 用于热数据缓存
+      # 生产建议: 200-500Gi (根据数据量调整)
+      # 注意: 本地 SSD 不支持动态扩容！
+      capacity: 200Gi
+
+    # GCS 访问配置 - 关键！
+    # 说明: 配置 BE 访问 GCS
+    configMapInfo:
+      configMapNamespace: doris
+      configMapName: be-config
+      resolveKey: be.conf
+
+    # Service 配置
+    service:
+      type: ClusterIP
+      ports:
+        - name: be-port
+          port: 9060
+          targetPort: 9060
+        - name: brpc-port
+          port: 9050
+          targetPort: 9050
+        - name: webserver-port
+          port: 8040
+          targetPort: 8040
+        - name: heartbeat-service-port
+          port: 9050
+          targetPort: 9050
+        - name: arrow-flight-sql-port
+          port: 9070
+          targetPort: 9070
+
+    # 探针配置
+    readinessProbe:
+      initialDelaySeconds: 30
+      periodSeconds: 5
+      successThreshold: 3
+      timeoutSeconds: 5
+
+    startupProbe:
+      # BE 启动探针
+      # 说明: BE 启动较慢，需要更长等待时间
+      initialDelaySeconds: 300
+      periodSeconds: 10
+      failureThreshold: 60  # 60 * 10 = 600 秒 = 10 分钟
+
+    # 亲和性配置
+    # 说明: BE 调度策略
+    affinity:
+      podAntiAffinity:
+        type: PreferNoSchedule
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+                - key: node.kubernetes.io/gke-local-ssd
+                  operator: Exists
+
+    tolerations:
+      - key: "node.kubernetes.io/local-storage"
+        operator: "Exists"
+        effect: "NoSchedule"
+
+    # BE 特定配置
+    # 说明: BE 节点特有配置
+    env:
+      - name: JAVA_OPTS
+        value: "-Xmx32g -Xms16g -XX:+UseG1GC"
+
+    # 自动扩缩容配置
+    # 说明: 是否启用自动扩缩容
+    # 注意: 需要配合 HPA 使用
+    # 详细配置见 hpa.yaml
+    hpa:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 10
+      # 扩缩容指标
+      metrics:
+        - type: Resource
+          resource:
+            name: cpu
+            target:
+              type: Utilization
+              averageUtilization: 70
+
+  # ---------------------------------------------------------------------------
+  # 存储计算分离配置 (GCS)
+  # ---------------------------------------------------------------------------
+  # 说明: 配置对象存储访问
+  # 注意: GKE 生产环境使用 GCS
+  # ---------------------------------------------------------------------------
+  spec:
+    # 对象存储配置
+    # 说明: S3/GCS 兼容对象存储配置
+    # 注意: 需要预先创建 GCS Bucket 并配置权限
+    objectStorage:
+      # 对象存储类型
+      # 可选值: s3, gs, bos, cos, obs
+      # GKE 生产: gs (Google Cloud Storage)
+      type: gs
+      # 存储路径
+      # 格式: gs://bucket/path
+      path: "gs://doris-data-production/be"
+      # 端点
+      # GCS: storage.googleapis.com
+      endpoint: "storage.googleapis.com"
+      # Region
+      # GCS: us-central1 或其他 region
+      region: "us-central1"
+      # 凭证配置
+      # 说明: 支持两种方式
+      # 方式1: Workload Identity (推荐)
+      #   - 无需配置 secretKey
+      #   - 通过 Service Account 绑定
+      # 方式2: Service Account Key
+      #   - 通过 secretKey 配置
+      # credential:
+      #   method: serviceAccount
+      #   serviceAccountCredentials:
+      #     secretRef: gcs-credential
+      # ---------------------------------------------------------------------------
+      # 工作负载身份配置 (推荐方式)
+      # ---------------------------------------------------------------------------
+      # 说明: 使用 GKE Workload Identity 让 Pod 以 GCP Service Account 访问 GCS
+      # 配置方式:
+      # 1. 创建 GCP Service Account
+      # 2. 绑定 Storage Object Admin 角色
+      # 3. 创建 K8s Service Account
+      # 4. 绑定两者 (workload identity)
+      # 5. 在 Pod spec 中引用 K8s Service Account
+      # ---------------------------------------------------------------------------
+
+  # ---------------------------------------------------------------------------
+  # 全局配置
+  # ---------------------------------------------------------------------------
+  # 说明: 适用于所有组件的全局配置
+  # ---------------------------------------------------------------------------
+
+  # Kubernetes 配置
+  kubernetes:
+    # 命名空间
+    namespace: doris
+
+    # 集群域名
+    # 说明: K8s 集群内部域名
+    # 默认: cluster.local
+    clusterDomain: cluster.local
+
+  # ---------------------------------------------------------------------------
+  # 故障恢复配置
+  # ---------------------------------------------------------------------------
+  recovery:
+    # 是否启用故障恢复
+    # 说明: 启用后 Operator 会自动恢复失败的 Pod
+    enabled: true
+    # 最大重试次数
+    maxRetry: 5
+    # 重试间隔
+    retryInterval: 10m
+
+  # ---------------------------------------------------------------------------
+  # 升级策略
+  # ---------------------------------------------------------------------------
+  upgradePolicy:
+    # 升级方式
+    # 可选值:
+    #   - RollingUpdate: 滚动升级 (推荐)
+    #   - ReplaceUpdate: 替换升级
+    rollingUpdate:
+      # 最大不可用实例数
+      maxUnavailable: 1
+      # 最大Surge
+      maxSurge: 1
+    # 升级超时
+    # 默认: 30m
+    timeout: 30m
+
+  # ---------------------------------------------------------------------------
+  # 监控配置
+  # ---------------------------------------------------------------------------
+  # 说明: 配置 Prometheus 抓取指标
+  # 详细配置见 monitoring.yaml
+  monitoring:
+    enabled: true
+    # Prometheus 配置
+    prometheus:
+      enabled: true
+      port: 8040
+      path: /metrics
+    # Grafana 配置
+    grafana:
+      enabled: true
+
+  # ---------------------------------------------------------------------------
+  # 日志配置
+  # ---------------------------------------------------------------------------
+  logging:
+    # 日志级别
+    level: INFO
+    # 日志保留天数
+    retention: 7
+
+  # ---------------------------------------------------------------------------
+  # 安全配置
+  # ---------------------------------------------------------------------------
+  security:
+    # Pod 安全策略
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      fsGroup: 1000
+    # Service Account
+    serviceAccount: doris-be
+
+# ---------------------------------------------------------------------------
+# 注解说明
+# ---------------------------------------------------------------------------
+# annotations:
+#   说明: Pod 注解，用于额外配置
+# 示例:
+#   prometheus.io/scrape: "true"    # 启用 Prometheus 抓取
+#   prometheus.io/port: "8040"      # Prometheus 抓取端口
+#   prometheus.io/path: "/metrics"  # Prometheus 抓取路径

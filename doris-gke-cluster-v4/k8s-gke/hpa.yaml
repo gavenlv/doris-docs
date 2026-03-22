@@ -1,0 +1,208 @@
+# =============================================================================
+# Horizontal Pod Autoscaler (HPA) - 自动扩缩容配置
+# =============================================================================
+#
+# 什么是 HPA？
+# - Kubernetes 内置的自动扩缩容机制
+# - 根据资源利用率自动调整 Pod 副本数
+# - 支持基于 CPU、内存或自定义指标
+#
+# 为什么需要 HPA？
+# - 传统静态资源配置无法应对负载变化
+# - 高峰期自动扩容保证性能
+# - 低峰期自动缩容降低成本
+# - 提高资源利用率
+#
+# HPA 工作原理：
+# 1. HPA Controller 定期检查指标
+# 2. 计算当前副本数是否满足目标利用率
+# 3. 如果不满足，触发扩缩容
+# 4. Deployment/StatefulSet 更新副本数
+#
+# 注意事项：
+# - 需要 Metrics Server 安装
+# - 扩缩容有冷却时间，防止震荡
+# - Doris 不建议频繁扩缩容（数据重分布开销大）
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# FE HPA 配置
+# -----------------------------------------------------------------------------
+# FE 扩缩容特点：
+# - FE 主要处理协调请求，资源需求相对稳定
+# - 扩缩容主要影响并发连接能力
+# - 建议设置较小的扩缩容范围
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: doris-fe-hpa
+  namespace: doris
+spec:
+  # scaleTargetRef: 要扩缩容的目标资源
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment          # Doris Operator 创建的是 Deployment
+    name: doriscluster-fe    # 目标 Deployment 名称
+
+  # minReplicas: 最小副本数
+  # - 不能小于 1（单点故障风险）
+  # - 生产环境建议至少 3
+  minReplicas: 3
+
+  # maxReplicas: 最大副本数
+  # - 防止过度扩容
+  # - 需要考虑节点资源上限
+  # - FE 通常不需要太多副本
+  maxReplicas: 10
+
+  # metrics: 扩缩容指标
+  metrics:
+    # CPU 利用率指标
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          # Utilization: 平均利用率
+          # - 所有 Pod 的平均 CPU 利用率
+          # - 70% 表示 CPU 平均使用 70% 时扩容
+          type: Utilization
+          averageUtilization: 70
+
+    # 内存利用率指标
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          # 内存利用率阈值通常设得比 CPU 高
+          # 因为内存波动不如 CPU 频繁
+          averageUtilization: 80
+
+  # behavior: 扩缩容行为配置
+  behavior:
+    # scaleDown: 缩容配置
+    scaleDown:
+      # stabilizationWindowSeconds: 稳定窗口时间
+      # - 缩容前等待的时间，防止抖动
+      # - 300 秒 = 5 分钟
+      stabilizationWindowSeconds: 300
+
+      policies:
+        # 每次缩容最多减少 10% 的 Pod
+        - type: Percent
+          value: 10
+          periodSeconds: 60  # 60 秒内最多缩容 10%
+
+    # scaleUp: 扩容配置
+    scaleUp:
+      # 扩容不需要等待（立即响应）
+      stabilizationWindowSeconds: 0
+
+      policies:
+        # 每次扩容最多增加 100% 的 Pod（即翻倍）
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+
+        # 或者每次扩容最多增加 2 个 Pod
+        - type: Pods
+          value: 2
+          periodSeconds: 15
+
+        # selectPolicy: 选择策略
+        # - Min: 取最小值（保守）
+        # - Max: 取最大值（激进）
+        # - Disabled: 禁用此指标
+        selectPolicy: Max
+
+---
+# =============================================================================
+# BE HPA 配置
+# =============================================================================
+# BE 扩缩容特点：
+# - BE 是数据存储和查询执行节点
+# - 扩缩容涉及数据重分布（开销较大）
+# - 建议：
+#   * 扩容可以相对积极
+#   * 缩容要保守（避免数据丢失）
+#   * 设置合理的冷却时间
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: doris-be-hpa
+  namespace: doris
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: doriscluster-be
+
+  # BE 可以有更大的扩缩容范围
+  minReplicas: 3
+  maxReplicas: 20
+
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+  behavior:
+    # 缩容更保守
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        # 每次缩容最多 10%
+        - type: Percent
+          value: 10
+          periodSeconds: 60
+
+    # 扩容更激进
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        # 可以翻倍
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+        # 或者每次增加 3 个
+        - type: Pods
+          value: 3
+          periodSeconds: 15
+        selectPolicy: Max
+
+# =============================================================================
+# HPA 配置参考
+# =============================================================================
+#
+# 扩容触发条件：
+# - CPU > 70% 持续一段时间
+# - 内存 > 80% 持续一段时间
+#
+# 缩容触发条件：
+# - CPU < 50% 持续 5 分钟
+# - 内存 < 60% 持续 5 分钟
+#
+# 扩容速度：
+# - 建议：每分钟增加 1-2 个 Pod
+# - 或：每分钟增加 10-50% 的 Pod
+#
+# 缩容速度：
+# - 建议：每分钟减少 1 个 Pod
+# - 或：每 5 分钟减少 10% 的 Pod
+#
+# 注意事项：
+# - Doris BE 扩缩容涉及数据重分布
+# - 频繁扩缩容会影响性能
+# - 生产环境建议手动扩容，提前规划容量
+# =============================================================================

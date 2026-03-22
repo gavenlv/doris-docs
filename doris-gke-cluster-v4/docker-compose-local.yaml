@@ -1,94 +1,126 @@
-# ==========================================
-# Doris 4.0.2 Local Development Docker Compose
-# ==========================================
-# Using pre-built images from registry
-# Usage: docker-compose -f docker-compose-local.yaml up -d
+# =============================================================================
+# Docker Compose - Doris 本地开发环境
+# =============================================================================
+#
+# 用途：使用 Docker Compose 在本地启动 Doris 集群（开发测试用）
+#
+# 注意：这是传统 Docker Compose 方式，不是 Kubernetes
+# 生产环境应使用 Kubernetes 部署
+#
+# 端口说明：
+# - FE: 8030 (HTTP), 9030 (MySQL), 9010 (REPL)
+# - BE: 8040 (HTTP), 9050 (Heartbeat), 8060 (Arrow Flight)
+# =============================================================================
 
-version: '3.8'
+version: '3.8'  # Docker Compose 文件版本
 
 services:
-  # ==========================================
-  # Doris Frontend (FE)
-  # ==========================================
-  doris-fe:
-    image: zlsmshoqvwt6q1.xuanyuan.run/apache/doris:fe-4.0.2
-    container_name: doris-local-fe
-    hostname: doris-fe
-    ports:
-      - "8030:8030"    # FE Web UI
-      - "9010:9010"    # FE RPC
-      - "9020:9020"    # FE Thrift
-      - "9030:9030"    # MySQL Client
+  # ===========================================================================
+  # FE (Frontend) 服务
+  # ===========================================================================
+  fe:
+    # 镜像：使用官方 Apache Doris FE 镜像
+    image: apache/doris:fe-3.1.4
+    container_name: doris-fe
+    hostname: fe
+
+    # 环境变量
     environment:
+      # FE_SERVERS: FE 集群列表
       - FE_SERVERS=fe1:127.0.0.1:9010
-      - FE_ID=1
-    volumes:
-      - fe-data:/opt/doris/fe/doris-meta
-      - fe-log:/opt/doris/fe/log
-    networks:
-      - doris-local-net
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8030/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
 
-  # ==========================================
-  # Doris Backend (BE)
-  # ==========================================
-  doris-be:
-    image: zlsmshoqvwt6q1.xuanyuan.run/apache/doris:be-4.0.2
-    container_name: doris-local-be
-    hostname: doris-be
+    # 端口映射：宿主机端口:容器端口
     ports:
-      - "8040:8040"    # BE Web UI
-      - "9050:9050"    # BE RPC
-      - "8060:8060"    # BE BRPC
-    environment:
-      - BE_PORT=9050
-      - BE_HEARTBEAT_PORT=9050
-      - BE_WEBSERVER_PORT=8040
-      - BE_BRPC_PORT=8060
-      - FE_HOSTS=doris-fe:9030
-      - BE_NAME=doris-be-1
+      - "8030:8030"  # FE HTTP
+      - "9030:9030"  # FE MySQL
+
+    # 卷挂载：持久化数据
     volumes:
-      - be-data:/opt/doris/be/storage
-      - be-log:/opt/doris/be/log
-    networks:
-      - doris-local-net
-    depends_on:
-      doris-fe:
-        condition: service_healthy
+      # FE 元数据（持久化存储）
+      - fe_data:/opt/doris/fe/doris-meta
+      # FE 日志
+      - fe_log:/opt/doris/fe/log
+
+    # 健康检查
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8040/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 90s
+      test: ["CMD", "bash", "-c", "curl -s http://127.0.0.1:8030/api/health"]
+      interval: 10s      # 检查间隔
+      timeout: 5s       # 超时时间
+      retries: 30        # 重试次数
+      start_period: 30s # 启动等待时间
 
-  # ==========================================
-  # Doris Local Validator (for connection testing)
-  # ==========================================
-  doris-validator:
-    image: mysql:8.0
-    container_name: doris-validator
+  # ===========================================================================
+  # BE (Backend) 服务
+  # ===========================================================================
+  be:
+    image: apache/doris:be-3.1.4
+    container_name: doris-be
+    hostname: be
+
     environment:
-      - MYSQL_ALLOW_EMPTY_PASSWORD=yes
-    command: ["sleep", "infinity"]
-    networks:
-      - doris-local-net
+      # BE_ADDR: BE 监听地址
+      - BE_ADDR=127.0.0.1:9050
+      # FE_HOST: FE 服务地址
+      - FE_HOST=127.0.0.1
+      # FE_PORT: FE MySQL 端口
+      - FE_PORT=9030
 
+    ports:
+      - "8040:8040"  # BE HTTP
+      - "9050:9050"  # BE Heartbeat
+      - "8060:8060"  # BE Arrow Flight
+
+    volumes:
+      # BE 数据存储
+      - be_data:/opt/doris/be/storage
+      # BE 临时目录
+      - be_tmp:/opt/doris/tmp
+      # BE 日志
+      - be_log:/opt/doris/be/log
+
+    # 依赖：等待 FE 就绪后再启动
+    depends_on:
+      fe:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "bash", "-c", "curl -s http://127.0.0.1:8040/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+# =============================================================================
+# 卷定义
+# =============================================================================
+# 命名卷：在宿主机上持久化存储
 volumes:
-  fe-data:
-    driver: local
-  fe-log:
-    driver: local
-  be-data:
-    driver: local
-  be-log:
-    driver: local
+  fe_data:       # FE 元数据
+  fe_log:        # FE 日志
+  be_data:       # BE 数据
+  be_tmp:        # BE 临时文件
+  be_log:        # BE 日志
 
-networks:
-  doris-local-net:
-    driver: bridge
+# =============================================================================
+# 使用方法
+# =============================================================================
+#
+# 启动集群：
+# docker-compose -f docker-compose-local.yaml up -d
+#
+# 查看日志：
+# docker-compose -f docker-compose-local.yaml logs -f
+#
+# 查看状态：
+# docker-compose -f docker-compose-local.yaml ps
+#
+# 连接集群：
+# mysql -h127.0.0.1 -P9030 -uroot
+#
+# 停止集群：
+# docker-compose -f docker-compose-local.yaml down
+#
+# 清理数据：
+# docker-compose -f docker-compose-local.yaml down -v
+#
+# =============================================================================

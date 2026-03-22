@@ -1,0 +1,14 @@
+# FE 配置
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fe-config
+  namespace: doris
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/component: fe
+data:
+  fe.conf: |
+    # FE 最小配置 - 不要在此添加 entrypoint 会自动修改的配置
+    meta_dir: /opt/doris/fe/doris-meta
+    log_level: INFO
