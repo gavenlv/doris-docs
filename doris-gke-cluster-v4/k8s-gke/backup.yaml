@@ -1,27 +1,51 @@
 # =============================================================================
-# Doris 定时备份配置
+# Doris 定时备份配置 - GKE 生产环境
 # =============================================================================
 #
-# 什么是定时备份？
-# - 使用 CronJob 定期执行备份任务
-# - 备份 Doris 的元数据到对象存储
-# - 支持 GCS (Google Cloud Storage)、S3、Azure Blob 等
+# 用途说明：
+#   通过 Kubernetes CronJob 定期备份 Doris 集群的元数据
 #
-# 备份类型：
-# 1. Snapshot Backup: 快照备份（常用）
-#    - 创建只读快照
-#    - 快速、高效
-#    - 支持增量备份
+# 为什么需要备份？
+#   1. 灾难恢复
+#      - 硬件故障、数据中心灾难
+#      - 人为误操作
 #
-# 2. Full Backup: 全量备份
-#    - 导出所有数据
-#    - 恢复简单
-#    - 数据量大时耗时
+#   2. 数据保护
+#      - 满足合规要求
+#      - 历史数据归档
+#
+#   3. 版本回滚
+#      - 升级失败回退
+#      - 测试环境恢复
+#
+# 备份类型说明：
+#   1. 快照备份 (Snapshot Backup)
+#      - 原理：创建只读快照
+#      - 优点：快速、支持增量
+#      - 适用：Doris 内置快照
+#
+#   2. 全量备份 (Full Backup)
+#      - 原理：导出所有数据
+#      - 优点：恢复简单
+#      - 适用：定期归档
+#
+# 存储后端支持：
+#   - GCS (Google Cloud Storage) - 本配置使用
+#   - S3 (AWS S3、MinIO)
+#   - Azure Blob Storage
+#   - HDFS
 #
 # 备份频率建议：
-# - 核心业务：每日备份
-# - 一般业务：每周备份
-# - 日志：保留 7-30 天
+#   | 场景 | 频率 | 保留时间 |
+#   |------|------|----------|
+#   | 核心业务 | 每小时/每日 | 30 天 |
+#   | 一般业务 | 每日 | 7-14 天 |
+#   | 归档数据 | 每周 | 1 年 |
+#
+# 恢复时间目标 (RTO)：
+#   - 元数据：< 30 分钟
+#   - 全量数据：取决于数据量
+#
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -29,119 +53,308 @@
 # -----------------------------------------------------------------------------
 #
 # 什么是 CronJob？
-# - K8s 定时任务资源
-# - 类似 Linux cron，指定时间执行任务
-# - 语法：分 时 日 月 周
+#   - Kubernetes 定时任务资源
+#   - 基于 Linux cron 的语法
+#   - 适合定期执行的任务
 #
-# Cron 表达式：
-# - "0 2 * * *"  = 每天凌晨 2:00
-# - "0 */6 * * *" = 每 6 小时
-# - "0 0 * * 0"  = 每周日午夜
-# - "0 0 1 * *"  = 每月 1 日午夜
+# 为什么使用 CronJob 而非 Deployment？
+#   - 备份是定期任务，不需要持续运行
+#   - CronJob 会在指定时间调度 Job 执行
+#   - 执行完成后资源自动释放
+#
+# Cron 表达式语法：
+#   ┌───────────── 分钟 (0-59)
+#   │ ┌───────────── 小时 (0-23)
+#   │ │ ┌───────────── 日 (1-31)
+#   │ │ │ ┌───────────── 月 (1-12)
+#   │ │ │ │ ┌───────────── 星期 (0-6, 0=周日)
+#   │ │ │ │ │
+#   * * * * *
+#
+# 常用表达式示例：
+#   - "0 2 * * *"   每天凌晨 2:00
+#   - "0 */6 * * *"  每 6 小时
+#   - "0 0 * * 0"   每周日午夜
+#   - "0 0 1 * *"    每月 1 日午夜
+#   - "0 2 * * 1-5" 工作日凌晨 2:00
+#
 
 apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: doris-backup
   namespace: doris
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/component: backup
 spec:
-  # schedule: Cron 表达式
-  schedule: "0 2 * * *"  # 每天凌晨 2 点执行
+  # schedule: 执行时间
+  # 为什么选择凌晨 2:00？
+  #   - 避开业务高峰期
+  #   - 备份期间性能影响最小
+  #   - 有足够时间完成备份
+  schedule: "0 2 * * *"
 
-  # successfulJobsHistoryLimit: 保留成功的 Job 数量
+  # successfulJobsHistoryLimit: 成功 Job 保留数量
+  # 为什么保留 3 个？
+  #   - 便于查看历史备份状态
+  #   - 需要手动清理时保留上下文
+  #   - 太多会占用资源
   successfulJobsHistoryLimit: 3
 
-  # failedJobsHistoryLimit: 保留失败的 Job 数量
+  # failedJobsHistoryLimit: 失败 Job 保留数量
+  # 为什么保留 3 个？
+  #   - 便于排查失败原因
+  #   - 保留足够的历史记录
   failedJobsHistoryLimit: 3
+
+  # 并发策略
+  # 为什么 ForbidConcurrent？
+  #   - 防止多个备份任务同时运行
+  #   - 避免资源竞争
+  #   - 确保备份完整性
+  concurrencyPolicy: Forbid
+
+  # 暂停策略
+  # 默认 false，正常执行
+  suspend: false
 
   jobTemplate:
     spec:
+      # Job 超时时间
+      # 为什么设置 1 小时？
+      #   - 备份可能需要较长时间
+      #   - 避免挂起任务占用资源
+      #   - 超时后自动失败触发重试
+      activeDeadlineSeconds: 3600
+
+      # 重试次数
+      # 为什么 3 次？
+      #   - 临时故障可以恢复
+      #   - 太多次可能陷入死循环
+      backoffLimit: 3
+
       template:
         spec:
-          restartPolicy: OnFailure  # 失败时重启容器
+          # 重启策略
+          # 为什么 OnFailure 而非 Always？
+          #   - Always: 容器无论退出码都重启（Job 不适用）
+          #   - OnFailure: 仅失败时重启
+          #   - Never: 从不重启（允许失败记录）
+          restartPolicy: OnFailure
+
           containers:
             - name: backup
+              # 使用 FE 镜像（包含 mysql 客户端）
+              # 为什么不用单独的 mysql 镜像？
+              #   - FE 镜像已包含 mysql CLI
+              #   - 减少镜像数量
+              #   - 环境一致性好
               image: apache/doris:fe-3.1.4
+
+              # 命令说明：
+              #   bash -c: 执行 shell 命令
+              #   -c 后面接脚本内容
               command:
                 - bash
                 - -c
                 - |
-                  # ================================================
+                  # =========================================================================
                   # 备份脚本
-                  # ================================================
+                  # =========================================================================
+                  #
+                  # 环境变量说明：
+                  #   MYSQL_ROOT_PASSWORD: 通过 Secret 注入
+                  #   为什么不用明文密码？
+                  #     - 安全最佳实践
+                  #     - 避免密码泄露到日志
+                  #     - 便于密码轮换
+                  #
+                  # BACKUP_DATE: 备份时间戳
+                  #   格式：YYYYMMDDHHMMSS
+                  #   用途：区分不同备份，创建独立目录
+                  # =========================================================================
 
-                  # 当前时间戳（用于备份目录命名）
+                  # 生成时间戳
                   BACKUP_DATE=$(date +%Y%m%d%H%M%S)
 
-                  # 备份存储路径（替换为实际的对象存储路径）
-                  # 支持：gs:// (GCS)、s3:// (AWS S3)、wasb:// (Azure)
+                  # 备份存储路径
+                  # 为什么使用 gs:// 前缀？
+                  #   - gs:// 表示 Google Cloud Storage
+                  #   - Doris 支持多种对象存储协议
+                  #   - 替换为实际 bucket 路径
                   BACKUP_PATH="gs://your-bucket/doris-backup/${BACKUP_DATE}"
 
-                  # ================================================
-                  # 执行备份
-                  # ================================================
-                  mysql -h doriscluster-fe-service -P9030 -uroot -e "BACKUP SNAPSHOT doris_repo TO ${BACKUP_PATH};"
+                  # =========================================================================
+                  # 备份命令
+                  # =========================================================================
+                  #
+                  # BACKUP SNAPSHOT 命令说明：
+                  #   - 创建 Doris 内部快照
+                  #   - 快照是只读的，备份期间不影响正常写入
+                  #   - 快照存储在指定的对象存储路径
+                  #
+                  # doris_repo: 仓库名称（需要预先创建）
+                  #   CREATE repository doris_repo TYPE = S3 BROKER (
+                  #     "bos_endpoint" = "https://gz.bcebos.com",
+                  #     "bos_accesskey" = "xxx",
+                  #     "bos_secret_accesskey" = "xxx",
+                  #     "bos_bucket" = "bucket-name"
+                  #   );
+                  #
+                  # =========================================================================
 
-                  # ================================================
-                  # 清理过期备份（保留 7 天）
-                  # ================================================
+                  mysql -h doriscluster-fe-service -P9030 -uroot -e "BACKUP SNAPSHOT doris_repo TO ${BACKUP_PATH};" || {
+                    echo "Backup failed, exiting..."
+                    exit 1
+                  }
+
+                  # =========================================================================
+                  # 清理过期备份
+                  # =========================================================================
+                  #
+                  # 保留策略：
+                  #   - 保留最近 7 天的快照
+                  #   - 删除旧快照释放存储空间
+                  #
+                  # 算法说明：
+                  #   1. 获取所有快照列表
+                  #   2. 解析快照创建时间
+                  #   3. 与当前时间比较
+                  #   4. 删除超过 7 天的快照
+                  # =========================================================================
+
+                  # 等待备份完成
+                  sleep 30
+
+                  # 获取快照列表并清理
                   mysql -h doriscluster-fe-service -P9030 -uroot -e "SHOW SNAPSHOTS FROM doris_repo;" | grep -E "^[0-9]" | while read line; do
                     SNAPSHOT_NAME=$(echo $line | awk '{print $2}')
                     SNAPSHOT_TIME=$(echo $line | awk '{print $4}' | sed 's/-//g' | sed 's/T//' | sed 's/://g')
                     CURRENT_TIME=$(date +%Y%m%d%H%M%S | cut -c1-8)
-                    # 删除 7 天前的快照
+                    # 删除 7 天前的快照 (7000000 = 7 天 × 1000000)
                     if [ $SNAPSHOT_TIME -lt $(($CURRENT_TIME - 7000000)) ]; then
+                      echo "Deleting old snapshot: ${SNAPSHOT_NAME}"
                       mysql -h doriscluster-fe-service -P9030 -uroot -e "DROP SNAPSHOT doris_repo.${SNAPSHOT_NAME};"
                     fi
                   done
 
-              # 环境变量（使用 Secret 存储密码）
+                  echo "Backup completed successfully"
+
+              # 环境变量（从 Secret 注入）
+              # 为什么使用 Secret？
+              #   - 密码不能明文存储
+              #   - 便于权限管理
+              #   - 支持密码轮换
               env:
                 - name: MYSQL_ROOT_PASSWORD
                   valueFrom:
                     secretKeyRef:
+                      # Secret 名称
                       name: doris-secret
+                      # Secret 中的键
                       key: mysql-root-password
 
+          # 资源限制
+          # 为什么限制资源？
+          #   - 防止备份任务占用过多资源
+          #   - 影响正常业务
+          resources:
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+
 ---
+
 # =============================================================================
-# Secret: 存储敏感信息
+# Secret: 敏感信息存储
 # =============================================================================
 #
-# 为什么要用 Secret？
-# - 密码不应该明文写在配置中
-# - Secret 可以单独管理权限
-# - 便于更新密码而不需要重新部署
+# 为什么使用 Secret？
+#   - 密码不应明文存储在配置中
+#   - Secret 可以独立管理权限
+#   - 便于更新密码而不需要重建资源
 #
-# 注意：实际使用时替换为真正的密码
-# =============================================================================
+# Secret 数据存储：
+#   - 方式 1：stringData（明文，自动 base64 编码）
+#   - 方式 2：data（预编码的 base64）
+#
+# 安全建议：
+#   - 生产环境使用 KMS 加密 Secret
+#   - 定期轮换密码
+#   - 限制 Secret 访问权限
+#
 
 apiVersion: v1
 kind: Secret
 metadata:
   name: doris-secret
   namespace: doris
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/component: backup
 type: Opaque
 stringData:
   # MySQL root 密码
+  # 为什么是 root？
+  #   - 备份需要全库权限
+  #   - 创建快照需要管理员权限
+  # 建议：
+  #   - 生产环境使用强密码
+  #   - 建议使用 16+ 位随机密码
   mysql-root-password: your-secure-password
 
 # =============================================================================
-# 备份恢复操作
+# 备份恢复操作指南
 # =============================================================================
 #
 # 查看可用快照：
-# SHOW SNAPSHOTS FROM doris_repo;
+#   mysql> SHOW SNAPSHOTS FROM doris_repo;
+#   +---------------------+---------------------+------+
+#   | Name                | Time                | Status|
+#   +---------------------+---------------------+------+
+#   | 20260101000000     | 2026-01-01 00:00:00 | OK    |
+#   +---------------------+---------------------+------+
 #
 # 恢复到指定快照：
-# RESTORE SNAPSHOT doris_repo FROM "gs://bucket/path/snapshot_name";
+#   mysql> RESTORE SNAPSHOT doris_repo FROM "gs://bucket/20260101000000";
+#   - 恢复期间集群可能只读
+#   - 恢复完成后验证数据
 #
 # 删除快照：
-# DROP SNAPSHOT doris_repo."snapshot_name";
+#   mysql> DROP SNAPSHOT doris_repo."snapshot_name";
 #
-# 注意事项：
-# - 恢复期间集群可能不可用
-# - 建议在低峰期操作
-# - 恢复后验证数据完整性
+# 查看仓库列表：
+#   mysql> SHOW REPOSITORIES;
+#
+# 创建新的仓库：
+#   mysql> CREATE repository doris_repo TYPE = S3 BROKER (
+#     "bos_endpoint" = "https://gz.bcebos.com",
+#     "bos_accesskey" = "xxx",
+#     "bos_secret_accesskey" = "xxx",
+#     "bos_bucket" = "bucket-name"
+#   );
+#
+# =============================================================================
+# 注意事项
+# =============================================================================
+#
+# 1. 备份期间：
+#    - 快照是只读的，不影响写入
+#    - 但会占用额外存储空间
+#    - 监控存储使用量
+#
+# 2. 恢复期间：
+#    - 建议在低峰期操作
+#    - 恢复期间集群可能不可用
+#    - 准备好回滚方案
+#
+# 3. 测试验证：
+#    - 定期测试恢复流程
+#    - 验证备份完整性
+#    - 记录恢复时间
 #
 # =============================================================================

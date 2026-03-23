@@ -2,98 +2,298 @@
 # Docker Compose - Doris 集群（官方镜像版）
 # =============================================================================
 #
-# 用途：使用官方 Apache Doris 镜像启动本地集群
+# 用途说明：
+#   使用 Apache Doris 官方预构建镜像快速启动本地集群
+#   适合场景：
+#     - 快速验证 Doris 功能
+#     - 学习 Doris 基本操作
+#     - 本地开发测试
+#     - POC (概念验证) 项目
 #
 # 与 docker-compose-local.yaml 的区别：
-# - 使用官方公共镜像（无需构建）
-# - 适合快速验证或学习
+#   | 特性         | 本文件           | docker-compose-local.yaml      |
+#   |--------------|------------------|-------------------------------|
+#   | 镜像来源     | 官方预构建镜像    | 本地构建镜像                  |
+#   | 镜像大小     | 首次需要下载     | 本地已构建                    |
+#   | 定制能力     | 有限            | 完全可控                      |
+#   | 适用场景     | 快速验证        | 深度开发/调试                 |
+#   | 构建时间     | 无              | 需要构建步骤                  |
 #
-# 端口说明：
-# | 端口 | 服务 | 说明 |
-# |------|------|------|
-# | 8030 | FE | Web UI、监控 |
-# | 9030 | FE | MySQL 协议（连接入口）|
-# | 8040 | BE | Web UI、监控 |
-# | 9050 | BE | 心跳（内部通信）|
-# | 8060 | BE | Arrow Flight SQL |
+# 官方镜像优势：
+#   1. 官方维护，经过验证
+#   2. 包含所有标准组件
+#   3. 持续更新，支持最新功能
+#   4. 社区支持丰富
+#
+# 官方镜像地址：
+#   - FE: apache/doris:{VERSION}-fe
+#   - BE: apache/doris:{VERSION}-be
+#   - 版本格式：2.0.x, 2.1.x, 3.0.x 等
+#
+# 版本兼容性说明：
+#   - FE 和 BE 必须使用相同主版本号
+#   - 推荐使用最新 LTS 版本（2.1.x）
+#   - 2.0.x 与 2.1.x 可以混合部署（向前兼容）
+#
 # =============================================================================
 
 version: '3.8'
 
 services:
   # ===========================================================================
-  # FE (Frontend) 服务
+  # FE (Frontend) 前端节点
   # ===========================================================================
+  #
+  # FE 核心职责：
+  #   1. SQL 解析与重写
+  #      - 将 SQL 解析为抽象语法树 (AST)
+  #      - 进行语法分析、语义分析
+  #      - 重写优化查询条件
+  #
+  #   2. 查询规划与优化
+  #      - 生成逻辑执行计划
+  #      - 进行成本优化
+  #      - 选择最优查询路径
+  #
+  #   3. 查询调度与协调
+  #      - 将查询下发到 BE 执行
+  #      - 协调多 BE 并行查询
+  #      - 收集合并 BE 返回结果
+  #
+  #   4. 元数据管理
+  #      - 管理数据库、表、分区元数据
+  #      - 管理用户权限
+  #      - 管理 UDF (用户定义函数)
+  #
+  #   5. 集群管理
+  #      - 管理 BE 节点注册/注销
+  #      - 监控 BE 健康状态
+  #      - 触发数据均衡
+  #
+  # FE 高可用原理：
+  #   - 使用 BDBJE (Berkeley DB Java Edition) 实现
+  #   - 复制日志保证元数据一致
+  #   - Leader 处理所有写操作
+  #   - Follower 只读，可分担读负载
+  #   - Observer 仅同步日志，不参与投票
+  #
   fe:
-    # 官方镜像
+    # 官方镜像地址格式：apache/doris:{VERSION}-fe
+    # VERSION 说明：
+    #   - 2.0.x: 早期生产版本
+    #   - 2.1.x: 当前主流版本 (推荐)
+    #   - 3.0.x: 最新版本，功能更多
     image: apache/doris:fe-3.1.4
 
-    # 容器名称（方便查看）
     container_name: doris-fe
-
-    # 主机名
     hostname: fe
 
-    # 环境变量
+    # FE 环境变量：
+    #
+    # FE_SERVERS 格式详解：
+    #   fe_name:host:edit_log_port
+    #
+    # 各字段说明：
+    #   - fe_name: FE 节点名称，唯一标识
+    #     为什么需要名称？
+    #       - BDBJE 集群使用名称标识节点
+    #       - 用于 Leader 选举日志
+    #
+    #   - host: FE 节点地址
+    #     为什么使用 127.0.0.1？
+    #       - 单节点部署，本地访问
+    #       - 多节点时填写实际 IP
+    #
+    #   - edit_log_port: 编辑日志端口
+    #     用途：FE-FE 之间复制元数据日志
+    #     默认：9010
     environment:
-      # FE 集群配置
-      # 格式：fe名称:主机:端口
       - FE_SERVERS=fe1:127.0.0.1:9010
 
-    # 端口映射：宿主机端口:容器端口
+    # 端口映射说明：
+    #
+    # 8030 (HTTP 端口)：
+    #   - Web UI 界面
+    #   - REST API
+    #   - Metrics 监控接口
+    #   - 健康检查端点
+    #   访问：http://localhost:8030
+    #
+    # 9030 (MySQL 端口)：
+    #   - MySQL 兼容协议
+    #   - SQL 客户端连接
+    #   - BE-FE 内部通信
+    #   连接：mysql -h127.0.0.1 -P9030 -uroot
     ports:
       - "8030:8030"  # FE HTTP
       - "9030:9030"  # FE MySQL
 
-    # 卷挂载：持久化数据
+    # 卷挂载说明：
+    #
+    # /opt/doris/fe/doris-meta：
+    #   元数据目录，核心数据！
+    #   包含：
+    #     - BDBJE 数据库文件
+    #     - 库表定义
+    #     - 用户权限
+    #     - 复制状态
+    #   备份建议：定期备份此目录
+    #
+    # /opt/doris/fe/log：
+    #   日志目录
+    #   包含：
+    #     - fe.log: 主日志
+    #     - fe.warn.log: 警告日志
+    #     - fe.out: 进程输出
+    #     - audit.log: 审计日志
     volumes:
-      # FE 元数据（表结构、用户信息等）
       - fe_data:/opt/doris/fe/doris-meta
-      # FE 日志
       - fe_log:/opt/doris/fe/log
 
-    # 健康检查
-    # 使用 curl 检查健康端点
+    # 健康检查详解：
+    #
+    # 为什么使用 /api/health 端点？
+    #   - Doris 提供专门的健康检查 API
+    #   - 返回 JSON 格式状态
+    #   - 比端口监听更可靠（端口监听不代表服务正常）
+    #
+    # 健康检查参数选择理由：
+    #   - interval: 10s
+    #     原因：平衡响应速度和资源消耗
+    #     太短：频繁检查消耗资源
+    #     太长：故障发现延迟
+    #
+    #   - retries: 30
+    #     原因：FE 启动通常需要 2-3 分钟
+    #     30 次 × 10s = 5 分钟足够启动
+    #
+    #   - start_period: 30s
+    #     原因：FE JVM 启动需要时间
+    #     过早检查会误判
     healthcheck:
       test: ["CMD", "bash", "-c", "curl -s http://127.0.0.1:8030/api/health"]
-      interval: 10s          # 每 10 秒检查一次
-      timeout: 5s           # 超时时间
-      retries: 30           # 连续失败 30 次视为不健康
-      start_period: 30s     # 容器启动后 30 秒开始检查
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
 
   # ===========================================================================
-  # BE (Backend) 服务
+  # BE (Backend) 后端节点
   # ===========================================================================
+  #
+  # BE 核心职责：
+  #   1. 数据存储
+  #      - 列式存储引擎
+  #      - 数据压缩（ZSTD、LZ4 等）
+  #      - 多种索引支持（BloomFilter、Bitmap 等）
+  #
+  #   2. 查询执行
+  #      - 向量化执行引擎
+  #      - 代码生成 (CodeGen)
+  #      - 并行执行
+  #
+  #   3. 数据写入
+  #      - Stream Load
+  #      - Routine Load
+  #      - Insert Into
+  #
+  # BE 存储架构：
+  #   Tablet = Partition × Bucket
+  #   - 分区：逻辑管理单元（按时间/业务划分）
+  #   - 分桶：物理存储单元（Hash 分布）
+  #   - Tablet 数量 = Partition × Bucket
+  #
   be:
     image: apache/doris:be-3.1.4
     container_name: doris-be
     hostname: be
 
+    # BE 环境变量详解：
+    #
+    # BE_ADDR：
+    #   BE 自身监听地址
+    #   为什么需要指定？
+    #     - FE 通过此地址下发查询任务
+    #     - BE 之间交换中间结果
+    #     - 默认使用容器 IP，但那是 Docker 分配的，不稳定
+    #   为什么用 127.0.0.1？
+    #     - 单节点部署
+    #     - 多节点时使用实际 IP
     environment:
-      # BE 监听地址
       - BE_ADDR=127.0.0.1:9050
 
-      # FE 主机地址
-      # 单节点部署使用 127.0.0.1
+      # FE_HOST：
+      #   FE 服务地址
+      #   为什么需要？
+      #     - BE 启动时主动连接 FE
+      #     - 通过 FE 注册到集群
+      #     - 后续心跳也通过 FE
       - FE_HOST=127.0.0.1
 
-      # FE MySQL 端口
+      # FE_PORT：
+      #   FE MySQL 端口
+      #   为什么用 9030？
+      #     - BE 通过 MySQL 协议与 FE 通信
+      #     - 注册、心跳、获取元数据都通过此端口
       - FE_PORT=9030
 
+    # BE 端口说明：
+    #
+    # 8040 (HTTP 端口)：
+    #   - Web UI
+    #   - Metrics
+    #   - 健康检查
+    #
+    # 9050 (Heartbeat 端口)：
+    #   - BE 向 FE 发送心跳
+    #   - 报告存储容量、使用情况
+    #   - 报告查询负载
+    #
+    # 8060 (Arrow Flight 端口)：
+    #   - 高速数据传输
+    #   - BE 之间交换数据
+    #   - 支持向量化和代码生成
     ports:
       - "8040:8040"  # BE HTTP
       - "9050:9050"  # BE Heartbeat
       - "8060:8060"  # BE Arrow Flight
 
+    # BE 卷挂载说明：
+    #
+    # /opt/doris/be/storage：
+    #   数据存储目录
+    #   包含：
+    #     - 数据文件 (.dat)
+    #     - 索引文件 (.idx)
+    #     - 元数据文件 (.hdr)
+    #   重要程度：★★★★☆
+    #   丢失数据不会导致集群崩溃，但业务数据丢失
+    #
+    # /opt/doris/tmp：
+    #   临时文件目录
+    #   包含：
+    #     - 查询中间结果
+    #     - 导入临时文件
+    #   重要程度：★☆☆☆☆
+    #   容器重启自动清空
+    #
+    # /opt/doris/be/log：
+    #   日志目录
+    #   包含：
+    #     - be.INFO
+    #     - be.WARNING
+    #     - be.ERROR
+    #     - be.out
     volumes:
-      # BE 数据存储
       - be_data:/opt/doris/be/storage
-      # BE 临时目录
       - be_tmp:/opt/doris/tmp
-      # BE 日志
       - be_log:/opt/doris/be/log
 
-    # 依赖：等待 FE 健康后再启动
+    # BE 依赖 FE 的原因：
+    #   1. BE 启动时需要连接 FE 注册
+    #   2. FE 管理 BE 的元数据
+    #   3. 没有 FE，BE 无法正常服务
+    #   4. 故障时 BE 会自动重试连接
     depends_on:
       fe:
         condition: service_healthy
@@ -108,38 +308,63 @@ services:
 # =============================================================================
 # 卷定义
 # =============================================================================
-# 命名卷：Docker 管理，持久化存储
 volumes:
-  fe_data:       # FE 元数据
-  fe_log:        # FE 日志
-  be_data:       # BE 数据
-  be_tmp:        # BE 临时文件
-  be_log:        # BE 日志
+  # FE 元数据卷
+  # 挂载点：/opt/doris/fe/doris-meta
+  # 内容：BDBJE 数据库文件
+  # 重要：元数据丢失无法恢复
+  fe_data:
+
+  # FE 日志卷
+  # 挂载点：/opt/doris/fe/log
+  # 内容：运行日志、审计日志
+  fe_log:
+
+  # BE 数据卷
+  # 挂载点：/opt/doris/be/storage
+  # 内容：列式存储数据
+  # 重要：业务数据所在
+  be_data:
+
+  # BE 临时卷
+  # 挂载点：/opt/doris/tmp
+  # 内容：查询中间结果
+  # 安全：重启自动清空
+  be_tmp:
+
+  # BE 日志卷
+  # 挂载点：/opt/doris/be/log
+  # 内容：运行日志
+  be_log:
 
 # =============================================================================
-# 使用方法
+# 快速开始
 # =============================================================================
 #
-# 启动集群：
-# docker-compose -f docker-compose-doris.yaml up -d
+# 1. 启动集群
+#    $ docker-compose -f docker-compose-doris.yaml up -d
 #
-# 查看日志：
-# docker-compose -f docker-compose-doris.yaml logs -f
+# 2. 等待服务就绪（约 1-2 分钟）
+#    $ docker-compose -f docker-compose-doris.yaml ps
+#    # 确认 FE 和 BE 都是 healthy 状态
 #
-# 查看容器：
-# docker-compose -f docker-compose-doris.yaml ps
+# 3. 连接集群
+#    $ mysql -h127.0.0.1 -P9030 -uroot
 #
-# 连接 MySQL：
-# mysql -h127.0.0.1 -P9030 -uroot
+# 4. 验证集群状态
+#    mysql> SHOW FRONTENDS;
+#    mysql> SHOW BACKENDS;
 #
-# 访问 Web UI：
-# - FE: http://localhost:8030
-# - BE: http://localhost:8040
+# 5. 创建测试表
+#    mysql> CREATE DATABASE test;
+#    mysql> USE test;
+#    mysql> CREATE TABLE example (
+#        id INT,
+#        name VARCHAR(100)
+#    ) DUPLICATE KEY(id) DISTRIBUTED BY HASH(id) BUCKETS 10;
 #
-# 停止集群：
-# docker-compose -f docker-compose-doris.yaml down
-#
-# 清理数据：
-# docker-compose -f docker-compose-doris.yaml down -v
+# 6. 插入测试数据
+#    mysql> INSERT INTO example VALUES (1, 'test');
+#    mysql> SELECT * FROM example;
 #
 # =============================================================================

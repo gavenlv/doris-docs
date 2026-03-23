@@ -2,97 +2,361 @@
 # Nexus 私有镜像仓库配置
 # =============================================================================
 #
-# 用途：配置 Nexus 仓库地址、认证信息和 Doris 集群参数
+# 用途说明：
+#   配置 Nexus 仓库连接参数和 Doris 集群规格
 #
 # 什么是 Nexus？
-# - Sonatype Nexus Repository Manager
-# - 私有镜像仓库，用于存储和管理 Docker 镜像
-# - 支持 Docker、Helm、Maven 等多种仓库类型
+#   Sonatype Nexus Repository Manager
+#   企业级制品仓库管理工具
 #
-# 为什么使用私有仓库？
-# - 安全：镜像不公开
-# - 速度：内网访问更快
-# - 版本控制：统一管理镜像版本
+# 仓库类型：
+#   1. Hosted（托管仓库）
+#      - 存储内部构建的镜像
+#      - 完全控制
+#
+#   2. Proxy（代理仓库）
+#      - 代理远程仓库（Docker Hub）
+#      - 缓存镜像加速访问
+#
+#   3. Group（仓库组）
+#      - 组合多个仓库
+#      - 提供统一访问入口
+#
+# 为什么需要私有镜像仓库？
+#   1. 安全要求
+#      - 敏感代码不能暴露
+#      - 访问审计
+#
+#   2. 性能需求
+#      - 内网访问更快
+#      - 减少外部依赖
+#
+#   3. 版本控制
+#      - 统一管理版本
+#      - 精确回滚
+#
 # =============================================================================
 
+# -----------------------------------------------------------------------------
 # Nexus 服务器配置
+# -----------------------------------------------------------------------------
 nexus:
   # Nexus 主机地址
+  # 为什么使用域名而非 IP？
+  #   - 便于迁移和灾备
+  #   - 支持负载均衡
+  #   - DNS 缓存优化
   host: "nexus.company.com"
 
-  # Nexus 端口
+  # Nexus Docker Registry 端口
+  # 为什么用 8082 而非默认 443？
+  #   - 8082 是 Nexus 默认 HTTP 端口
+  #   - 配置简单，无需 SSL 证书
+  #   - 适合内网环境
+  # 注意：生产环境建议配置 HTTPS
   port: 8082
 
-  # 仓库配置
+  # 仓库名称配置
+  # 为什么需要单独配置仓库名？
+  #   - Nexus 支持多个 Docker 仓库
+  #   - 分离正式和测试镜像
+  #   - 权限控制更灵活
   repositories:
-    # Docker 代理仓库（从 Docker Hub 拉取）
+    # Docker 代理仓库
+    # 用途：代理 Docker Hub，缓存公共镜像
+    # 好处：
+    #   - 首次拉取后本地缓存
+    #   - 节省外网带宽
+    #   - 加快构建速度
     docker: "doris-docker"
 
-    # Docker 托管仓库（推送本地镜像）
+    # Docker 托管仓库
+    # 用途：存储内部构建的镜像
+    # 好处：
+    #   - 完全私有
+    #   - 版本控制
+    #   - 访问控制
     docker-hosted: "doris-docker-hosted"
 
-  # 镜像标签
-  # 完整镜像地址 = host:port/repository:tag
+  # 镜像标签（完整路径）
+  # 为什么需要完整路径？
+  #   - Kubernetes 拉取镜像需要完整地址
+  #   - 格式：host:port/repository:tag
+  #   - tag 建议包含版本和安全标识
   tags:
+    # FE 镜像完整地址
+    # 命名规范：{host}/{org}/{image}:{version}-{modifier}
+    # - org: 组织名，便于分类
+    # - version: 版本号
+    # - modifier: 版本修饰（如 secure 表示加固版）
     fe: "nexus.company.com:8082/doris/fe:2.1.7-secure"
     be: "nexus.company.com:8082/doris/be:2.1.7-secure"
 
   # 认证信息
-  # 注意：生产环境应使用环境变量，不要明文存储密码
+  # 为什么需要认证？
+  #   - 保护镜像安全
+  #   - 追踪访问记录
+  #   - 权限控制
+  #
+  # 安全建议：
+  #   - 生产环境使用 ServiceAccount
+  #   - 或使用 Vault 等密钥管理服务
+  #   - 定期轮换密码
   auth:
     username: "admin"
-    # 密码：支持环境变量引用
-    # 格式：${ENV_VAR:-default_value}
+
+    # 密码配置
+    # 为什么使用环境变量？
+    #   - 避免密码明文存储
+    #   - 便于 CI/CD 集成
+    #   - 支持密钥轮换
+    #
+    # 格式说明：${ENV_VAR:-default_value}
+    #   - ENV_VAR: 环境变量名
+    #   - default_value: 默认值（可选）
+    #
+    # 为什么有默认值？
+    #   - 方便开发测试
+    #   - 生产环境应设置环境变量覆盖
     password: "${NEXUS_PASSWORD:-adminadmin}"
 
+# -----------------------------------------------------------------------------
 # Doris 集群配置
+# -----------------------------------------------------------------------------
+# 为什么在这里配置集群规格？
+#   - 统一管理部署参数
+#   - 便于文档化
+#   - 支持环境切换（dev/staging/prod）
+#
 doris:
-  # Doris 版本
+  # Doris 版本号
+  # 必须与镜像版本一致！
   version: "2.1.7"
 
   # FE 配置
   fe:
-    # 副本数：生产建议 3
+    # 副本数
+    # 为什么生产需要 3 副本？
+    #   - 高可用：1 副本故障服务中断
+    #   - 读写分离：只读查询可分发
+    #   - 选举需要 odd number
+    #
+    # 选举机制：
+    #   - BDBJE 协议需要 odd number
+    #   - 3 副本可容忍 1 节点故障
+    #   - 5 副本可容忍 2 节点故障
     replicas: 3
 
     # 资源配置
+    # 为什么需要资源配置？
+    #   - 确保稳定服务
+    #   - 防止资源竞争
+    #   - 便于成本核算
     resources:
+      # CPU 配额
+      # 建议：
+      #   - 开发：1-2 核
+      #   - 测试：2-4 核
+      #   - 生产：4-8 核
       cpu: "4"
+
+      # 内存配额
+      # 建议：
+      #   - 开发：4-8 Gi
+      #   - 测试：8-16 Gi
+      #   - 生产：16-32 Gi
+      #
+      # 注意：FE 内存主要用途
+      #   - JVM 堆内存
+      #   - BDBJE 缓存
+      #   - 元数据缓存
       memory: "8Gi"
 
   # BE 配置
   be:
-    # 副本数：生产建议 3+
+    # 副本数
+    # 为什么生产需要更多 BE？
+    #   - 数据分布需要足够节点
+    #   - 并行查询提升性能
+    #   - 存储容量线性扩展
+    #
+    # 数据分布原理：
+    #   - 数据按 Bucket 分布到 BE
+    #   - Bucket 数量在建表时指定
+    #   - 建议 Bucket 数 = BE 节点数 × 3
     replicas: 6
 
     resources:
+      # CPU 配额
+      # BE 是计算密集型
+      # 建议：8-16 核
       cpu: "8"
+
+      # 内存配额
+      # BE 内存用途：
+      #   - 向量执行内存
+      #   - 数据块缓存
+      #   - 查询中间结果
+      # 建议：32-64 Gi
       memory: "32Gi"
 
-      # 存储配置（PVC 大小）
+      # 存储配置
+      # 为什么配置 PVC 大小？
+      #   - 动态存储需要配额
+      #   - 便于容量规划
+      #   - 防止无限膨胀
+      #
+      # 存储估算：
+      #   - 原始数据 × 3（副本+索引+缓存）
+      #   - 考虑数据增长
+      #   - 预留 30% 余量
       storage: "100Gi"
 
 # =============================================================================
-# Nexus 配置说明
+# Nexus 配置详细说明
 # =============================================================================
+
+# -----------------------------------------------------------------------------
+# 首次使用 Nexus
+# -----------------------------------------------------------------------------
 #
-# 首次使用 Nexus：
-# 1. 访问 http://nexus.company.com:8082
-# 2. 使用 admin/admin123 登录
-# 3. 创建 Docker 仓库
-# 4. 配置 Docker registry URL
+# 1. 访问 Nexus Web UI
+#    地址：http://nexus.company.com:8082
+#    浏览器直接打开
 #
-# Docker 登录 Nexus：
-# docker login nexus.company.com:8082 -u admin
+# 2. 首次登录
+#    用户名：admin
+#    密码：admin123
+#    ⚠️ 首次登录必须修改密码！
 #
-# 推送镜像到 Nexus：
-# docker tag doris-fe:2.1.7 nexus.company.com:8082/doris/fe:2.1.7-secure
-# docker push nexus.company.com:8082/doris/fe:2.1.7-secure
+# 3. 启用 Docker Bearer Token Realm
+#    路径：Administration → Security → Realms
+#    找到 "Docker Bearer Token Realm"
+#    点击 "Active"
+#    保存
 #
-# K8s 使用私有镜像：
-# 1. 创建 Secret：kubectl create secret docker-registry nexus-secret
-# 2. 在 Pod spec 中引用：
-#    imagePullSecrets:
-#      - name: nexus-secret
+# 4. 创建 Docker 托管仓库
+#    路径：Administration → Repository → Repositories → Create repository
+#    选择 "docker (hosted)"
+#    配置：
+#      Name: doris-docker-hosted
+#      HTTP: 8082
+#      勾选 "Allow anonymous docker pull"（可选）
+#    保存
+#
+# 5. 创建 Docker 代理仓库（可选）
+#    路径：同上
+#    选择 "docker (proxy)"
+#    配置：
+#      Name: doris-docker
+#      Remote URL: https://registry-1.docker.io
+#    保存
+#
+# 6. 创建仓库组（可选）
+#    路径：同上
+#    选择 "docker (group)"
+#    配置：
+#      Name: doris-docker-group
+#      HTTP: 8082
+#      添加 member repositories
+#    保存
+#
+
+# -----------------------------------------------------------------------------
+# Docker 客户端配置
+# -----------------------------------------------------------------------------
+#
+# 为什么需要配置？
+#   - Docker 默认只信任 HTTPS
+#   - Nexus 8082 使用 HTTP
+#   - 需要显式告知 Docker
+#
+# Linux 配置 /etc/docker/daemon.json：
+# {
+#   "insecure-registries": ["nexus.company.com:8082"]
+# }
+#
+# Docker Desktop (Mac/Windows)：
+#   打开 Docker Desktop → Settings → Docker Engine
+#   添加 "insecure-registries"
+#   点击 Apply & Restart
+#
+
+# -----------------------------------------------------------------------------
+# 登录 Nexus
+# -----------------------------------------------------------------------------
+#
+# 交互式登录：
+# $ docker login nexus.company.com:8082 -u admin
+# Password: <输入密码>
+# 登录成功会显示 "Login Succeeded"
+#
+# 免交互登录（CI/CD）：
+# $ echo $NEXUS_PASSWORD | docker login nexus.company.com:8082 -u admin --password-stdin
+#
+
+# -----------------------------------------------------------------------------
+# 推送镜像到 Nexus
+# -----------------------------------------------------------------------------
+#
+# 1. 标记镜像
+#    docker tag <源镜像> <Nexus地址>/<镜像路径>
+#
+#    示例：
+#    $ docker tag doris-fe:2.1.7 nexus.company.com:8082/doris/fe:2.1.7-secure
+#
+# 2. 推送镜像
+#    docker push <完整镜像地址>
+#
+#    示例：
+#    $ docker push nexus.company.com:8082/doris/fe:2.1.7-secure
+#
+
+# -----------------------------------------------------------------------------
+# Kubernetes 使用私有镜像
+# -----------------------------------------------------------------------------
+#
+# 方法 1：创建 Image Pull Secret
+#    # 创建 Secret
+#    $ kubectl create secret docker-registry nexus-secret \
+#      --docker-server=nexus.company.com:8082 \
+#      --docker-username=admin \
+#      --docker-password=${NEXUS_PASSWORD} \
+#      --docker-email=admin@company.com \
+#      -n doris
+#
+#    # 在 Pod spec 中引用
+#    spec:
+#      imagePullSecrets:
+#        - name: nexus-secret
+#
+# 方法 2：ServiceAccount 关联
+#    # 将 Secret 关联到 ServiceAccount
+#    $ kubectl patch serviceaccount default \
+#      -p '{"imagePullSecrets":[{"name":"nexus-secret"}]}' \
+#      -n doris
+#
+#    # 所有 Pod 默认使用此 ServiceAccount
+#
+# 方法 3：Kubeconfig 中配置
+#    # 在 ~/.docker/config.json 中配置
+#    # kubectl 会自动使用
+#
+
+# -----------------------------------------------------------------------------
+# 常见问题排查
+# -----------------------------------------------------------------------------
+#
+# Q1: login 失败 "http: server gave HTTP response to HTTPS client"
+# A: Docker 客户端未配置 insecure-registry
+#
+# Q2: push 失败 "denied: unauthorized"
+# A: 未登录或权限不足，检查 docker login
+#
+# Q3: pull 失败 "image not found"
+# A: 镜像路径错误或未推送，检查仓库
+#
+# Q4: Kubernetes 无法拉取镜像
+# A: 检查 imagePullSecrets 配置和 Secret 命名空间
 #
 # =============================================================================

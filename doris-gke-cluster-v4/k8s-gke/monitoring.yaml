@@ -1,28 +1,89 @@
 # =============================================================================
-# Prometheus 监控配置
+# Prometheus 监控配置 - GKE 生产环境
 # =============================================================================
 #
-# 什么是 Prometheus + ServiceMonitor？
-# - Prometheus: 开源监控系统，采集和存储指标
-# - ServiceMonitor: Prometheus Operator 的 CRD
-# - 自动发现 K8s Service 并采集监控指标
+# 监控体系架构：
 #
-# Doris 监控指标：
-# - FE: 查询延迟、连接数、元数据操作
-# - BE: 写入速度、查询性能、存储使用
+#   ┌─────────────────────────────────────────────────────────────────────┐
+#   │                    Prometheus Operator                              │
+#   │   ┌───────────────┐  ┌───────────────┐  ┌───────────────┐      │
+#   │   │ ServiceMonitor │  │ ServiceMonitor │  │ PrometheusRule│      │
+#   │   │    (FE)        │  │    (BE)        │  │   (Alerts)    │      │
+#   │   └───────────────┘  └───────────────┘  └───────────────┘      │
+#   └─────────────────────────────────────────────────────────────────────┘
+#                              │
+#                              ▼
+#   ┌─────────────────────────────────────────────────────────────────────┐
+#   │                     Prometheus Server                               │
+#   │   ┌───────────────┐  ┌───────────────┐                           │
+#   │   │   Scrape FE   │  │   Scrape BE   │                           │
+#   │   │   /metrics    │  │   /metrics    │                           │
+#   │   └───────────────┘  └───────────────┘                           │
+#   └─────────────────────────────────────────────────────────────────────┘
+#                              │
+#                              ▼
+#   ┌─────────────────────────────────────────────────────────────────────┐
+#   │                    AlertManager                                     │
+#   │   ┌───────────────┐  ┌───────────────┐                           │
+#   │   │   Email       │  │   Slack       │                           │
+#   │   └───────────────┘  └───────────────┘                           │
+#   └─────────────────────────────────────────────────────────────────────┘
+#
+# 什么是 ServiceMonitor？
+#   - Prometheus Operator 的 CRD
+#   - 定义如何监控 Kubernetes Service
+#   - 自动配置 Prometheus scrape targets
+#
+# 为什么使用 ServiceMonitor？
+#   1. 声明式配置
+#      - 声明式定义监控目标
+#      - 不需要手动修改 Prometheus 配置
+#
+#   2. 自动发现
+#      - 标签自动匹配 Service
+#      - Pod 变化自动更新
+#
+#   3. 动态更新
+#      - 配置变更自动生效
+#      - 无需重启 Prometheus
+#
+# Doris 监控指标分类：
+#   1. FE 指标
+#      - 查询延迟
+#      - 连接数
+#      - 元数据操作
+#      - 导入吞吐量
+#
+#   2. BE 指标
+#      - 查询扫描行数
+#      - 写入速度
+#      - 存储使用
+#      - 压缩率
 #
 # 前置条件：
-# - 已安装 Prometheus Operator
-# - 或手动安装 Prometheus Server
+#   - Prometheus Operator 已安装
+#   - ServiceMonitor CRD 已注册
+#   - Doris 开启 metrics 接口
+#
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# ServiceMonitor: FE 监控
+# ServiceMonitor: FE 监控配置
 # -----------------------------------------------------------------------------
+#
 # ServiceMonitor 作用：
-# - 自动发现 Service
-# - 配置 Prometheus 抓取地址
-# - 定义抓取间隔和指标路径
+#   1. 声明需要监控的 Service
+#   2. 定义抓取端点
+#   3. 通知 Prometheus 如何抓取指标
+#
+# 为什么使用 ServiceMonitor 而非 static_configs？
+#   - Kubernetes 动态环境，Pod IP 变化
+#   - Service 提供稳定访问入口
+#   - 标签选择机制灵活
+#
+# 架构说明：
+#   ServiceMonitor → 匹配 Service → Prometheus 抓取 → /metrics 端点
+#
 
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -30,38 +91,79 @@ metadata:
   name: doris-fe-monitor
   namespace: doris
   labels:
+    # app: 应用标识
     app: doris
-    # release 标签用于 Prometheus 选择此 ServiceMonitor
-    # 必须与 Prometheus 配置中的 serviceMonitorSelector 匹配
+
+    # release 标签作用：
+    #   - Prometheus Operator 通过此标签选择 ServiceMonitor
+    #   - 必须与 Prometheus 配置中的 serviceMonitorSelector 匹配
+    #   - 通常设为 "prometheus" 或 "main"
     release: prometheus
+
+    # 自定义标签
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/component: fe
 spec:
-  # jobLabel: 将某个 label 的值作为 job name
+  # jobLabel: 生成的 job 名称
+  #   生成的 Prometheus job 名称 = jobLabel 的值
+  #   用于 PromQL 查询中标识指标来源
   jobLabel: doris-fe
 
   # selector: 选择要监控的 Service
+  #   matchLabels: 必须完全匹配的标签
+  #   匹配带有 app.kubernetes.io/component=fe 标签的 Service
   selector:
     matchLabels:
       app.kubernetes.io/component: fe
 
   # namespaceSelector: 在哪些命名空间中查找 Service
+  #   为什么需要这个？
+  #     - ServiceMonitor 可能与目标 Service 在不同命名空间
+  #     - 提供跨命名空间监控能力
+  #   matchNames: 匹配的命名空间列表
   namespaceSelector:
     matchNames:
       - doris
 
   # endpoints: 抓取端点配置
+  #   定义 Prometheus 如何抓取指标
   endpoints:
-    - port: fe-http           # Service 的端口名称
-      path: /metrics          # 指标路径
-      interval: 15s           # 抓取间隔
-      # 可选：指标 TLS 配置
-      # scheme: https
-      # tlsConfig:
-      #   caFile: /etc/prometheus/certs/ca.crt
+    # port: Service 的端口名称
+    #   为什么用名称而非数字？
+    #     - 名称更稳定，不依赖端口号
+    #     - 便于 Service 配置管理
+    - port: fe-http
+
+      # path: 指标路径
+      #   Doris metrics 端点
+      path: /metrics
+
+      # interval: 抓取间隔
+      #   为什么 15 秒？
+      #     - 足够频繁捕获变化
+      #     - 不过于频繁增加负载
+      #   建议：
+      #     - 核心指标：15s
+      #     - 详细指标：30s-1m
+      interval: 15s
+
+      # scrapeTimeout: 抓取超时
+      #   为什么设置超时？
+      #     - 防止某个目标挂起
+      #     - 影响其他抓取任务
+      scrapeTimeout: 10s
+
+      # 指标路径前缀（可选）
+      #   用于多版本共存场景
+      # metricRelabelings: []
 
 ---
+
 # -----------------------------------------------------------------------------
-# ServiceMonitor: BE 监控
+# ServiceMonitor: BE 监控配置
 # -----------------------------------------------------------------------------
+# 与 FE ServiceMonitor 类似，监控 BE 指标
+#
 
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -71,6 +173,8 @@ metadata:
   labels:
     app: doris
     release: prometheus
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/component: be
 spec:
   jobLabel: doris-be
   selector:
@@ -83,21 +187,37 @@ spec:
     - port: be-http
       path: /metrics
       interval: 15s
+      scrapeTimeout: 10s
 
 ---
+
 # =============================================================================
-# PrometheusRule: 告警规则
+# PrometheusRule: 告警规则配置
 # =============================================================================
 #
 # 什么是 PrometheusRule？
-# - 定义告警条件
-# - 当条件满足时生成告警
-# - 告警发送到 AlertManager
+#   - 定义告警条件
+#   - 告警触发后的标签和注释
+#   - 由 Prometheus 评估
 #
-# 告警状态：
-# - Pending: 条件满足，等待评估时间
-# - Firing: 评估通过，告警触发
-# =============================================================================
+# 告警生命周期：
+#   1. Pending（待定）
+#      - 条件满足，等待 for 指定的持续时间
+#      - 告警已生成但未触发
+#
+#   2. Firing（触发）
+#      - 持续时间满足条件
+#      - 告警发送到 AlertManager
+#
+#   3. Resolved（解决）
+#      - 条件不再满足
+#      - 发送恢复通知
+#
+# 告警级别说明：
+#   - critical（严重）：服务不可用，需要立即处理
+#   - warning（警告）：性能下降，需要关注
+#   - info（信息）：通知性告警
+#
 
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -109,25 +229,42 @@ metadata:
     release: prometheus
 spec:
   groups:
-    # group 名称，在一个 group 内名称必须唯一
+    # group 名称：在一组内必须唯一
     - name: doris-alerts
-      rules:
-        # ---------------------------------------------------------------------
-        # FE 告警
-        # ---------------------------------------------------------------------
 
-        # FE High CPU - FE CPU 使用率过高
+      # rules: 告警规则列表
+      rules:
+
+        # =====================================================================
+        # FE 告警规则
+        # =====================================================================
+
+        # -------------------------------------------------------------------------
+        # FE CPU 使用率过高
+        # -------------------------------------------------------------------------
         - alert: DorisFEHighCPU
+          # expr: PromQL 表达式
+          # rate(process_cpu_seconds_total[5m]): CPU 使用率（5 分钟平均值）
+          # service_type="fe": 只看 FE 指标
           expr: rate(process_cpu_seconds_total{service_type="fe"}[5m]) > 0.8
-          for: 5m              # 持续 5 分钟触发
+          # for: 条件持续时间
+          # 持续 5 分钟才触发，避免瞬时峰值误报
+          for: 5m
           labels:
             severity: warning
           annotations:
+            # summary: 简短告警摘要
             summary: "Doris FE High CPU Usage"
+            # description: 详细告警描述
+            # {{ $labels.instance }}: 模板变量，替换为标签值
             description: "Doris FE {{ $labels.instance }} CPU usage is above 80%"
 
-        # FE High Memory - FE 内存使用率过高
+        # -------------------------------------------------------------------------
+        # FE 内存使用率过高
+        # -------------------------------------------------------------------------
         - alert: DorisFEHighMemory
+          # process_resident_memory_bytes: 实际内存使用
+          # process_max_memory_bytes: 配置的最大内存
           expr: process_resident_memory_bytes{service_type="fe"} / process_max_memory_bytes{service_type="fe"} > 0.9
           for: 5m
           labels:
@@ -136,8 +273,11 @@ spec:
             summary: "Doris FE High Memory Usage"
             description: "Doris FE {{ $labels.instance }} memory usage is above 90%"
 
-        # FE Down - FE 服务不可用
+        # -------------------------------------------------------------------------
+        # FE 服务不可用
+        # -------------------------------------------------------------------------
         - alert: DorisFEDown
+          # up == 0: Prometheus 无法抓取指标，服务宕机
           expr: up{service_type="fe"} == 0
           for: 1m
           labels:
@@ -146,11 +286,10 @@ spec:
             summary: "Doris FE Down"
             description: "Doris FE {{ $labels.instance }} is down"
 
-        # ---------------------------------------------------------------------
-        # BE 告警
-        # ---------------------------------------------------------------------
+        # =====================================================================
+        # BE 告警规则
+        # =====================================================================
 
-        # BE High CPU
         - alert: DorisBEHighCPU
           expr: rate(process_cpu_seconds_total{service_type="be"}[5m]) > 0.8
           for: 5m
@@ -160,7 +299,6 @@ spec:
             summary: "Doris BE High CPU Usage"
             description: "Doris BE {{ $labels.instance }} CPU usage is above 80%"
 
-        # BE High Memory
         - alert: DorisBEHighMemory
           expr: process_resident_memory_bytes{service_type="be"} / process_max_memory_bytes{service_type="be"} > 0.9
           for: 5m
@@ -170,7 +308,6 @@ spec:
             summary: "Doris BE High Memory Usage"
             description: "Doris BE {{ $labels.instance }} memory usage is above 90%"
 
-        # BE Down
         - alert: DorisBEDown
           expr: up{service_type="be"} == 0
           for: 1m
@@ -180,12 +317,16 @@ spec:
             summary: "Doris BE Down"
             description: "Doris BE {{ $labels.instance }} is down"
 
-        # ---------------------------------------------------------------------
+        # =====================================================================
         # 数据健康告警
-        # ---------------------------------------------------------------------
+        # =====================================================================
 
-        # Tablet Errors - Tablet 错误过多
+        # -------------------------------------------------------------------------
+        # Tablet 错误
+        # -------------------------------------------------------------------------
         - alert: DorisTabletFailed
+          # doris_tablet_err_count: Tablet 错误计数
+          # 大于 0 表示有问题
           expr: doris_tablet_err_count > 0
           for: 1m
           labels:
@@ -194,8 +335,12 @@ spec:
             summary: "Doris Tablet Errors"
             description: "Doris has {{ $value }} tablet errors"
 
-        # Disk Full - 磁盘空间不足
+        # -------------------------------------------------------------------------
+        # 磁盘空间不足
+        # -------------------------------------------------------------------------
         - alert: DorisDiskFull
+          # 计算磁盘使用率
+          # (总容量 - 可用容量) / 总容量 > 0.9 = 使用率 > 90%
           expr: (1 - doris_be_disks_avail_capacity / doris_be_disks_total_capacity) > 0.9
           for: 5m
           labels:
@@ -204,8 +349,12 @@ spec:
             summary: "Doris BE Disk Almost Full"
             description: "Doris BE {{ $labels.instance }} disk usage is above 90%"
 
-        # Query Timeout - 查询超时过多
+        # -------------------------------------------------------------------------
+        # 查询错误率过高
+        # -------------------------------------------------------------------------
         - alert: DorisQueryTimeout
+          # doris_fe_query_err_rate: 查询错误率
+          # rate(错误数[时间窗口]): 错误速率
           expr: rate(doris_fe_query_err_rate[5m]) > 0.1
           for: 5m
           labels:
@@ -218,22 +367,35 @@ spec:
 # 告警配置参考
 # =============================================================================
 #
-# 告警级别：
-# - critical: 严重，影响服务，需要立即处理
-# - warning: 警告，可能影响服务，需要关注
-# - info: 信息，用于通知
+# 告警处理流程：
+#   1. 告警触发 → AlertManager → 通知渠道
+#   2. 值班人员接收通知
+#   3. 排查问题
+#   4. 处理完成后告警自动恢复
 #
-# 常用指标：
-# | 指标 | 说明 | 告警阈值 |
-# |------|------|---------|
-# | process_cpu_seconds_total | CPU 使用率 | > 80% |
-# | process_resident_memory_bytes | 内存使用 | > 90% |
-# | doris_be_disks_avail_capacity | 磁盘可用 | < 10% |
-# | doris_tablet_err_count | Tablet 错误数 | > 0 |
+# 常用 PromQL 函数：
+#   - rate(): 计算增长率
+#   - increase(): 计算增长量
+#   - avg(): 平均值
+#   - max(): 最大值
+#   - min(): 最小值
+#   - sum(): 求和
+#   - topk(): 返回最大的 k 个值
 #
-# 告警通知方式：
-# - Email
-# - Slack
-# - PagerDuty
-# - 自定义 Webhook
+# 告警通知渠道配置（AlertManager）：
+#   - email: 邮件通知
+#   - slack: Slack 频道
+#   - pagerduty: PagerDuty
+#   - webhook: 自定义 HTTP 回调
+#
+# 常用指标说明：
+#   | 指标 | 说明 | 单位 |
+#   |------|------|------|
+#   | process_cpu_seconds_total | CPU 使用时间 | 秒 |
+#   | process_resident_memory_bytes | 实际内存使用 | 字节 |
+#   | doris_be_disks_avail_capacity | 磁盘可用容量 | 字节 |
+#   | doris_be_disks_total_capacity | 磁盘总容量 | 字节 |
+#   | doris_tablet_err_count | Tablet 错误数 | 数量 |
+#   | doris_fe_query_err_rate | 查询错误率 | 比率 |
+#
 # =============================================================================

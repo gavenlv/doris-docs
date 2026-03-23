@@ -2,68 +2,170 @@
 # Docker Compose - Nexus 私有仓库 + Doris 测试环境
 # =============================================================================
 #
-# 用途：
-# 1. 启动 Nexus 私有镜像仓库
-# 2. 测试构建的 Doris 镜像
+# 用途说明：
+#   1. 启动 Nexus 私有镜像仓库（用于存储离线 Docker 镜像）
+#   2. 提供 Doris 镜像存储和分发能力
+#   3. 测试构建的 Doris 镜像是否正常工作
+#
+# 为什么需要这个配置？
+#   - 在离线或内网环境中，无法访问 Docker Hub
+#   - 需要预先存储和分发 Doris 镜像
+#   - 构建自定义 Doris 镜像后需要地方存储
+#   - 团队成员需要共享镜像
 #
 # Nexus 是什么？
-# - Sonatype Nexus Repository Manager
-# - 私有镜像仓库，用于存储 Docker 镜像
-# - 支持代理、托管等多种仓库类型
+#   - Sonatype Nexus Repository Manager
+#   - 企业级制品仓库管理工具
+#   - 支持 Docker、Maven、NPM、YUM 等多种仓库类型
+#   - 提供代理（缓存远程仓库）、托管（存储内部制品）功能
+#
+# 架构设计：
+#   宿主机  ─────────────────────────────────────────────────────
+#                │
+#                │ 8081 (Nexus Web UI)
+#                │ 8082 (Docker Registry)
+#                ▼
+#   ┌─────────────────────────────────────────────────────────┐
+#   │              Docker Network (doris-net)                │
+#   │                                                         │
+#   │   ┌──────────┐    ┌──────────┐    ┌──────────┐         │
+#   │   │  Nexus   │    │ Test-FE  │    │ Test-BE  │         │
+#   │   │ :8081   │    │ 镜像测试  │    │ 镜像测试  │         │
+#   │   │ :8082   │    │          │    │          │         │
+#   │   └──────────┘    └──────────┘    └──────────┘         │
+#   │                                                         │
+#   └─────────────────────────────────────────────────────────┘
+#                │
+#                │ 命名卷 (nexus-data)
+#                ▼
+#   ┌─────────────────────────────────────────────────────────┐
+#   │              宿主机文件系统                              │
+#   │   /var/lib/docker/volumes/xxx/_data                    │
+#   │   - 存储 Nexus 配置                                    │
+#   │   - 存储 Docker 镜像层                                 │
+#   └─────────────────────────────────────────────────────────┘
 #
 # 端口说明：
-# - 8081: Nexus Web UI
-# - 8082: Docker Hosted Repository（HTTPS）
+#   | 端口 | 服务              | 用途                           |
+#   |------|-------------------|--------------------------------|
+#   | 8081 | Nexus Web UI      | 仓库管理界面                   |
+#   | 8082 | Docker Registry   | Docker 镜像存储（HTTP）        |
+#
+# 安全提示：
+#   - 默认密码 admin123 必须在首次登录后修改
+#   - 生产环境应配置 HTTPS
+#   - Docker Registry 在 8082 端口使用 HTTP，适合内网
+#
 # =============================================================================
 
-version: '3.8'  # Docker Compose 文件版本
+version: '3.8'
 
 services:
   # ===========================================================================
-  # Nexus3 私有仓库
+  # Nexus3 私有仓库服务
   # ===========================================================================
+  # 为什么使用单独的 Service？
+  #   - Nexus 是基础设施服务，需要先启动
+  #   - 测试容器依赖 Nexus 获取镜像
+  #   - 独立生命周期，方便单独管理
   nexus:
-    # 镜像：使用官方 Nexus3 镜像
+    # 镜像选择理由：
+    #   - sonatype/nexus3 是官方维护的镜像
+    #   - latest 标签自动使用最新稳定版
+    #   - 相比自建 Registry，Nexus 提供更好的管理界面
     image: sonatype/nexus3:latest
+
+    # 容器名称作用：
+    #   - 方便 docker ps 查看
+    #   - 便于 docker logs、docker exec 等操作
     container_name: doris-nexus
 
-    # 端口映射
+    # 端口映射详解：
+    #   格式：宿主机端口:容器端口
+    #   - 8081: Nexus Web 管理界面
+    #   - 8082: Docker Hosted Registry（HTTP）
+    #
+    # 为什么用 HTTP (8082) 而不是 HTTPS (443)？
+    #   - 配置简单，无需证书
+    #   - 适合内网/开发环境
+    #   - 生产环境建议添加 Nginx 反向代理配置 HTTPS
     ports:
-      - "8081:8081"  # Nexus Web UI（管理界面）
-      - "8082:8082"  # Docker Hosted Repository（镜像仓库）
+      - "8081:8081"  # Nexus Web UI - 仓库管理界面
+      - "8082:8082"  # Docker Registry - 镜像推送/拉取
 
-    # 环境变量
+    # 环境变量配置说明：
+    #   INSTALL4J_ADD_VM_PARAMS: Nexus 运行 JVM 参数
+    #     -Xmx1024m: 限制最大堆内存为 1GB
+    #     原因：Nexus 本身不需要太大内存，节省资源
+    #
+    #   JAVA_OPTS: Java 运行时参数
+    #     -Djava.net.preferIPv4Stack=true: 优先使用 IPv4
+    #     原因：避免 IPv6 导致的网络问题
     environment:
-      # JVM 内存参数
       - INSTALL4J_ADD_VM_PARAMS=-Xmx1024m
-      # 优先使用 IPv4
       - JAVA_OPTS=-Djava.net.preferIPv4Stack=true
 
-    # 卷挂载：持久化 Nexus 数据
+    # 卷挂载详解：
+    #   作用：持久化 Nexus 的配置和存储数据
+    #   为什么需要持久化？
+    #     - 容器删除后数据不丢失
+    #     - 重新部署无需重新配置
+    #     - 存储的 Docker 镜像层需要持久化
+    #   挂载点 /nexus-data：
+    #     - Nexus 默认数据目录
+    #     - 包含仓库配置、存储的制品、安全数据库
     volumes:
-      # Nexus 数据卷（包含仓库配置和存储的镜像）
       - nexus-data:/nexus-data
 
-    # 网络：加入 doris-net 网络
+    # 网络配置：
+    #   加入 doris-net 网络后，可以被其他容器通过容器名访问
+    #   例如：test-fe 可以通过 http://nexus:8081 访问 Nexus
     networks:
       - doris-net
 
+    # 资源限制（可选添加）：
+    #   deploy:
+    #     resources:
+    #       limits:
+    #         memory: 4G
+    #   原因：防止 Nexus 占用过多内存影响其他服务
+
   # ===========================================================================
-  # 测试容器：FE
+  # 测试容器：FE (Frontend)
   # ===========================================================================
-  # 用于验证构建的 Doris FE 镜像
-  # 命令 sleep infinity 让容器保持运行
+  # 为什么需要测试容器？
+  #   - 验证本地构建的 doris-fe 镜像是否正常工作
+  #   - 检查镜像内 EntryPoint 脚本是否正确
+  #   - 确认容器可以正常启动和停止
+  #
+  # 为什么使用 sleep infinity？
+  #   - 测试容器不需要运行实际服务
+  #   - 只是为了保持容器处于 Running 状态
+  #   - 方便进入容器内部检查 (docker exec -it test-fe bash)
   test-fe:
-    image: doris-fe:2.1.7  # 本地构建的镜像
+    # 使用本地构建的镜像
+    # 构建命令：docker build -t doris-fe:2.1.7 -f docker/fe/Dockerfile .
+    image: doris-fe:2.1.7
     container_name: doris-test-fe
-    command: ["sleep", "infinity"]  # 保持容器运行
+
+    # 保持容器运行
+    # 为什么不用 long-running 命令？
+    #   - FE 启动需要完整配置和 BE 连接
+    #   - 测试环境可能没有完整依赖
+    #   - sleep infinity 更简单直接
+    command: ["sleep", "infinity"]
+
     networks:
       - doris-net
+
+    # 依赖关系：
+    #   depends_on 只保证启动顺序，不保证服务就绪
+    #   这里依赖 Nexus 是为了展示网络连通性
     depends_on:
-      - nexus  # 等待 Nexus 启动
+      - nexus
 
   # ===========================================================================
-  # 测试容器：BE
+  # 测试容器：BE (Backend)
   # ===========================================================================
   test-be:
     image: doris-be:2.1.7
@@ -75,50 +177,108 @@ services:
       - nexus
 
 # =============================================================================
-# 卷定义
+# 卷定义 (Volumes)
 # =============================================================================
+#
+# 什么是卷？
+#   - Docker 管理的持久化存储
+#   - 独立于容器生命周期
+#   - 多个容器可以共享同一个卷
+#
+# 为什么使用命名卷而不是_bind mount_？
+#   - 命名卷由 Docker 管理，权限控制更简单
+#   - 不依赖宿主机的具体路径
+#   - 在 Windows/Mac 等不同平台行为一致
+#   - 便于备份和迁移
+#
+# nexus-data 卷内容：
+#   - /nexus-data/blob/         # 存储的制品文件
+#   - /nexus-data/etc/          # Nexus 配置文件
+#   - /nexus-data/security/     # 安全数据库（用户、角色）
+#   - /nexus-data/log/          # Nexus 日志
+#
 volumes:
   # Nexus 数据卷
-  # 挂载到容器的 /nexus-data 目录
-  # 数据持久化存储，容器删除后数据保留
+  # 作用：持久化 Nexus 的配置和所有存储的镜像
+  # 注意：删除容器不会删除卷，需要单独 docker volume rm 清理
   nexus-data:
 
 # =============================================================================
-# 网络定义
+# 网络定义 (Networks)
 # =============================================================================
+#
+# 什么是桥接网络？
+#   - Docker 默认的容器网络模式
+#   - 同一网络的容器可以相互通信
+#   - 容器可以通过容器名作为 hostname 访问
+#
+# 为什么创建专用网络？
+#   - 隔离不同项目的容器
+#   - 避免端口冲突
+#   - 便于网络管理和策略控制
+#
 networks:
-  # 桥接网络：各容器可以相互通信
+  # 桥接网络特点：
+  #   - 自动分配 172.17-172.30 网段的 IP
+  #   - 提供 DNS 解析（通过容器名）
+  #   - 容器可以直接通过端口映射访问外网
   doris-net:
     driver: bridge
 
 # =============================================================================
-# 使用方法
+# 完整使用流程
 # =============================================================================
 #
 # 1. 启动 Nexus
-#    docker-compose up -d nexus
+#    $ docker-compose up -d nexus
 #
-# 2. 访问 Nexus Web UI
-#    http://localhost:8081
-#    默认账号：admin
-#    默认密码：admin123（首次登录需要修改）
+# 2. 等待 Nexus 启动完成（约 2-3 分钟）
+#    $ docker-compose logs -f nexus
+#    # 看到 "Nexus Repository Manager started" 表示就绪
 #
-# 3. 配置 Docker 仓库
-#    - 创建 Docker (Hosted) 仓库
-#    - 启用 Docker Bearer Token Realm
-#    - 配置 HTTPS（如需要）
+# 3. 访问 Nexus Web UI
+#    浏览器打开: http://localhost:8081
+#    首次登录：
+#      用户名: admin
+#      密码: admin123
+#    首次登录会要求修改密码
 #
-# 4. 登录 Docker 仓库
-#    docker login localhost:8082 -u admin -p admin123
+# 4. 配置 Docker Registry（Nexus 内）
+#    a. 登录后点击 "Administration" > "Repositories"
+#    b. 点击 "Create repository" > "docker (hosted)"
+#    c. 配置：
+#       Name: docker-hosted
+#       HTTP: 8082
+#       Enable Docker Bearer Token Realm: ✓
+#    d. 保存
 #
-# 5. 推送镜像
-#    docker tag doris-fe:2.1.7 localhost:8082/doris/fe:2.1.7
-#    docker push localhost:8082/doris/fe:2.1.7
+# 5. 配置 Docker 客户端信任 HTTP
+#    # 编辑 /etc/docker/daemon.json（Linux）或 Docker Desktop 设置
+#    {
+#      "insecure-registries": ["localhost:8082"]
+#    }
+#    # 重启 Docker
 #
-# 6. 测试镜像
-#    docker-compose up -d test-fe test-be
+# 6. 登录 Docker Registry
+#    $ docker login localhost:8082 -u admin -p <你修改的密码>
 #
-# 7. 清理
-#    docker-compose down
+# 7. 构建并推送镜像
+#    # 构建 Doris FE 镜像
+#    $ docker build -t doris-fe:2.1.7 -f docker/fe/Dockerfile .
+#
+#    # 标记镜像
+#    $ docker tag doris-fe:2.1.7 localhost:8082/doris/fe:2.1.7
+#
+#    # 推送
+#    $ docker push localhost:8082/doris/fe:2.1.7
+#
+# 8. 在测试容器中使用
+#    # 修改 test-fe 的 image 为刚推送的镜像
+#    $ docker-compose up -d test-fe
+#
+# 9. 清理
+#    $ docker-compose down
+#    # 如果要删除卷（清除所有数据）
+#    $ docker-compose down -v
 #
 # =============================================================================
