@@ -1,0 +1,61 @@
+# build-tools/nexus-docker-compose.yaml
+# 本地 Nexus 3.x 用于模拟私有 Docker 镜像仓库
+#
+# 访问地址: http://localhost:5000
+# 默认账号: admin / admin123
+#
+# 仓库列表:
+#   - doris-docker:      代理仓库 (代理 Docker Hub)
+#   - doris-docker-hosted: 本地 hosted 仓库 (存储我们构建的镜像)
+
+version: "3.8"
+
+services:
+  nexus:
+    image: sonatype/nexus3:3.68.1
+    container_name: doris-nexus
+    restart: unless-stopped
+    ports:
+      - "5000:5000"       # Docker registry API
+      - "5001:5001"       # Docker registry token service (可选)
+      - "8081:8081"       # Nexus Web UI
+    environment:
+      INSTALL4J_ADD_VM_PARAMS: "-Xms1024m -Xmx2048m -XX:MaxDirectMemorySize=2048m"
+      NEXUS_SECURITY_RANDOMPASSWORD: "false"
+    volumes:
+      # 持久化 Nexus 数据
+      - nexus-data:/nexus-data
+      # 可选：初始化脚本 (第一次启动时创建仓库)
+      # - ./nexus-init.groovy:/nexus-data/etc/db/initialization/nexus.groovy:ro
+    networks:
+      - doris-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-s", "http://localhost:8081/", "-o", "/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # 可选：Nexus UI 反向代理 (如果需要通过域名访问)
+  # nginx-nexus:
+  #   image: nginx:alpine
+  #   container_name: doris-nexus-proxy
+  #   restart: unless-stopped
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./nginx-nexus.conf:/etc/nginx/conf.d/default.conf:ro
+  #   depends_on:
+  #     - nexus
+  #   networks:
+  #     - doris-net
+
+volumes:
+  nexus-data:
+    driver: local
+
+networks:
+  doris-net:
+    name: doris-network
+    driver: bridge

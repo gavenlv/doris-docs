@@ -39,8 +39,8 @@ metadata:
     app.kubernetes.io/managed-by: doris-operator
     # 环境标签
     environment: production
-    # 版本标签
-    doris version: "2.1"
+    # 版本标签（Kubernetes label 键只允许字母、数字、- _ . ，不能含空格）
+    doris-version: "4.0.4"
 spec:
   # ---------------------------------------------------------------------------
   # FE 配置
@@ -55,8 +55,9 @@ spec:
 
     # 镜像配置
     # 说明: Doris FE 镜像
-    # GKE 建议: 使用官方镜像或私有仓库镜像
-    image: apache/doris:2.1.5
+    # 镜像地址由 build-tools/build-all.sh 构建并推送到 Nexus
+    # 部署时会通过 deploy.sh 替换 NEXUS_REGISTRY 占位符
+    image: ${NEXUS_REGISTRY}apache/doris:4.0.4-secure
 
     # 资源限制
     # 说明: Container 资源请求和限制
@@ -201,7 +202,9 @@ spec:
     replicas: 3
 
     # 镜像配置
-    image: apache/doris:2.1.5
+    # 镜像地址由 build-tools/build-all.sh 构建并推送到 Nexus
+    # 部署时会通过 deploy.sh 替换 NEXUS_REGISTRY 占位符
+    image: ${NEXUS_REGISTRY}apache/doris:4.0.4-secure
 
     # 资源限制
     # 说明: Container 资源请求和限制
@@ -372,6 +375,11 @@ spec:
   # ---------------------------------------------------------------------------
   # 说明: 适用于所有组件的全局配置
   # ---------------------------------------------------------------------------
+
+  # 镜像拉取凭证（Nexus 私有仓库认证）
+  # 由 deploy.sh 的 create_image_pull_secret 函数创建
+  imagePullSecrets:
+    - name: doris-registry
 
   # Kubernetes 配置
   kubernetes:

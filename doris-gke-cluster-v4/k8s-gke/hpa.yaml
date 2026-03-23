@@ -42,8 +42,8 @@ spec:
   # scaleTargetRef: 要扩缩容的目标资源
   scaleTargetRef:
     apiVersion: apps/v1
-    kind: Deployment          # Doris Operator 创建的是 Deployment
-    name: doriscluster-fe    # 目标 Deployment 名称
+    kind: StatefulSet          # Doris Operator 创建的是 StatefulSet
+    name: doriscluster-fe    # 目标 StatefulSet 名称
 
   # minReplicas: 最小副本数
   # - 不能小于 1（单点故障风险）
@@ -136,7 +136,7 @@ metadata:
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
-    kind: Deployment
+    kind: StatefulSet
     name: doriscluster-be
 
   # BE 可以有更大的扩缩容范围

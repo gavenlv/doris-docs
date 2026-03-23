@@ -1,72 +1,122 @@
 #!/bin/bash
 # =============================================================================
-# Doris Local K8s 卸载脚本
+# Doris Local K8s 卸载脚本 - 存算分离架构
 # =============================================================================
 # 作用: 卸载本地 Doris 集群及相关资源
 # 使用: ./undeploy.sh
 #
-# 卸载顺序:
-#   1. 删除 HPA (如果存在)
-#   2. 删除 DorisCluster
-#   3. 删除 ConfigMap 和 Secret
-#   4. 删除命名空间和 RBAC
-#   5. 删除 Doris Operator (可选)
+# 卸载顺序 (按依赖关系倒序):
+#   1. 删除 DorisDisaggregatedCluster
+#   2. 删除 MinIO (StatefulSet + Service + PVC)
+#   3. 删除 FoundationDB 集群
+#   4. 删除 FoundationDB Operator
+#   5. 删除 Doris Operator
+#   6. 删除 Doris namespace 和 RBAC
+#   7. 删除 foundationdb namespace
 # =============================================================================
 
 set -e
 
-NAMESPACE="doris"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo ""
 echo "=========================================="
 echo "   Doris Local K8s 卸载脚本"
+echo "   (存算分离架构)"
 echo "=========================================="
 echo ""
-echo "Namespace: $NAMESPACE"
-echo ""
 
-# 1. 删除 HPA
-echo "[1/5] 删除 HPA 自动扩缩容..."
-kubectl delete -f "${SCRIPT_DIR}/hpa.yaml" --ignore-not-found=true
-echo "HPA 已删除"
-
-# 2. 删除 DorisCluster
+# 确认操作
+read -p "警告: 此操作将删除所有 Doris 数据! 继续? (y/N): " -n 1 -r
 echo ""
-echo "[2/5] 删除 DorisCluster..."
-kubectl delete -f "${SCRIPT_DIR}/doriscluster.yaml" --ignore-not-found=true
-echo "DorisCluster 已删除"
-
-# 3. 删除 ConfigMap
-echo ""
-echo "[3/5] 删除 ConfigMap..."
-kubectl delete -f "${SCRIPT_DIR}/configmap.yaml" --ignore-not-found=true
-echo "ConfigMap 已删除"
-
-# 4. 删除命名空间和存储
-echo ""
-echo "[4/5] 删除命名空间和存储..."
-kubectl delete -f "${SCRIPT_DIR}/00-namespace.yaml" --ignore-not-found=true
-echo "命名空间已删除"
-
-# 5. 删除 Doris Operator (可选)
-echo ""
-echo "[5/5] 删除 Doris Operator..."
-read -p "是否删除 Doris Operator 和 CRD? (y/N): " -n 1 -r
-echo ""
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    kubectl delete -f "${SCRIPT_DIR}/operator.yaml" --ignore-not-found=true
-    echo "Doris Operator 已删除"
-else
-    echo "保留 Doris Operator"
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "取消卸载"
+    exit 0
 fi
 
+# =============================================================================
+# 1. 删除 DorisDisaggregatedCluster
+# =============================================================================
+echo ""
+echo "[1/7] 删除 DorisDisaggregatedCluster..."
+kubectl delete -f "${SCRIPT_DIR}/doris-disaggregated-cluster.yaml" --ignore-not-found=true
+echo "DorisDisaggregatedCluster 已删除"
+
+# =============================================================================
+# 2. 删除 MinIO
+# =============================================================================
+echo ""
+echo "[2/7] 删除 MinIO..."
+kubectl delete -f "${SCRIPT_DIR}/minio-statefulset.yaml" --ignore-not-found=true
+echo "MinIO 已删除"
+
+# 删除 MinIO 的 PVC (如有)
+echo "删除 MinIO PVC..."
+kubectl delete pvc -n foundationdb -l app.kubernetes.io/name=minio --ignore-not-found=true
+echo "MinIO PVC 已删除"
+
+# =============================================================================
+# 3. 删除 FoundationDB 集群
+# =============================================================================
+echo ""
+echo "[3/7] 删除 FoundationDB 集群..."
+kubectl delete -f "${SCRIPT_DIR}/fdbcluster.yaml" --ignore-not-found=true
+echo "FoundationDB 集群已删除"
+
+# 删除 FDB 的 PVC (如有)
+echo "删除 FDB PVC..."
+kubectl delete pvc -n foundationdb -l app.kubernetes.io/name=foundationdb --ignore-not-found=true
+echo "FDB PVC 已删除"
+
+# =============================================================================
+# 4. 删除 FoundationDB Operator
+# =============================================================================
+echo ""
+echo "[4/7] 删除 FoundationDB Operator..."
+kubectl delete -f "${SCRIPT_DIR}/fdb-operator.yaml" --ignore-not-found=true
+echo "FoundationDB Operator 已删除"
+
+# =============================================================================
+# 5. 删除 Doris Operator
+# =============================================================================
+echo ""
+echo "[5/7] 删除 Doris Operator..."
+kubectl delete -f "${SCRIPT_DIR}/operator.yaml" --ignore-not-found=true
+echo "Doris Operator 已删除"
+
+# =============================================================================
+# 6. 删除 Doris namespace 和 RBAC
+# =============================================================================
+echo ""
+echo "[6/7] 删除 Doris namespace..."
+kubectl delete namespace doris --ignore-not-found=true
+echo "Doris namespace 已删除"
+
+# =============================================================================
+# 7. 删除 foundationdb namespace
+# =============================================================================
+echo ""
+echo "[7/7] 删除 foundationdb namespace..."
+kubectl delete namespace foundationdb --ignore-not-found=true
+echo "foundationdb namespace 已删除"
+
+# =============================================================================
+# 完成
+# =============================================================================
 echo ""
 echo "=========================================="
 echo "   卸载完成"
 echo "=========================================="
 echo ""
-echo "提示:"
-echo "  - 如需彻底清理，运行: kubectl delete namespace doris"
-echo "  - 如需彻底清理 Operator，运行: kubectl delete -f operator.yaml"
+echo "已清理的资源:"
+echo "  - DorisDisaggregatedCluster (FE + BECN + MetaService)"
+echo "  - MinIO (StatefulSet + Service + PVC)"
+echo "  - FoundationDB 集群 (Cluster + PVC)"
+echo "  - FoundationDB Operator"
+echo "  - Doris Operator"
+echo "  - namespace doris"
+echo "  - namespace foundationdb"
+echo ""
+echo "如需完全清理残留 PVC，请运行:"
+echo "  kubectl delete pvc --all -A"
 echo ""

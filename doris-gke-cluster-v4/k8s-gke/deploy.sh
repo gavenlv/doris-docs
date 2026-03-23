@@ -31,6 +31,20 @@ set -e
 # 配置
 # =============================================================================
 
+# 镜像仓库配置
+# 从 build-tools/build-all.sh 构建推送到 Nexus
+# 本地开发: localhost:5000
+# 生产环境: nexus.company.com:5000 或 gcr.io
+NEXUS_REGISTRY="${NEXUS_REGISTRY:-localhost:5000/doris}"
+NEXUS_PASSWORD="${NEXUS_PASSWORD:-admin123}"
+NEXUS_USERNAME="${NEXUS_USERNAME:-admin}"
+
+# Doris 版本
+DORIS_VERSION="${DORIS_VERSION:-4.0.4}"
+
+# Operator 版本
+OPERATOR_VERSION="${OPERATOR_VERSION:-1.4.0}"
+
 # 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -106,6 +120,9 @@ check_tools() {
     log_info "当前 Context: $context"
 }
 
+# 获取脚本所在目录（必须在使用相对路径之前定义）
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # =============================================================================
 # GCS Bucket 配置
 # =============================================================================
@@ -179,7 +196,7 @@ configure_workload_identity() {
 create_storageclass() {
     log_info "创建 GKE StorageClass..."
 
-    kubectl apply -f 00-namespace.yaml
+    kubectl apply -f "${SCRIPT_DIR}/00-namespace.yaml"
 
     log_info "StorageClass 创建完成"
 }
@@ -190,46 +207,51 @@ create_storageclass() {
 
 # 部署离线 Operator
 deploy_offline_operator() {
-    log_info "部署 Doris Operator (离线模式)..."
+    log_info "部署 Doris Operator..."
 
-    # 检查是否有离线包
-    local operator_version="25.8.0"
-    local offline_bundle="doris-operator-${operator_version}.tar.gz"
+    # 检查是否有离线包（优先）或从 Nexus 拉取
+    local offline_bundle="${PROJECT_ROOT:-${SCRIPT_DIR}/..}/source-packages/doris-operator-bundle-${OPERATOR_VERSION}.tar.gz"
 
     if [ -f "$offline_bundle" ]; then
         log_info "使用离线包: $offline_bundle"
 
-        # 解压离线包
-        tar -xzf $offline_bundle
+        # 解压到临时目录
+        local extract_dir="/tmp/doris-operator-$$"
+        mkdir -p "$extract_dir"
+        tar -xzf "$offline_bundle" -C "$extract_dir"
 
-        # 部署 CRD
-        kubectl apply -f ./doris-operator/config/crd/bases/
+        # 查找解压后的目录
+        local op_dir=$(find "$extract_dir" -maxdepth 1 -type d -name "doris-operator*" | head -1)
 
-        # 部署 Operator
-        kubectl apply -f ./doris-operator/config/operator/
+        if [ -n "$op_dir" ] && [ -d "$op_dir/config/crd/bases" ]; then
+            # 部署 CRD
+            kubectl apply -f "${op_dir}/config/crd/bases/"
+            # 部署 Operator
+            kubectl apply -f "${op_dir}/config/operator/"
+            log_info "离线 Operator 部署完成"
+        else
+            log_error "离线包结构不正确"
+            exit 1
+        fi
 
         # 清理
-        rm -rf ./doris-operator
-
-        log_info "离线 Operator 部署完成"
+        rm -rf "$extract_dir"
     else
-        log_warn "未找到离线包: $offline_bundle"
-        log_info "尝试从 GitHub 下载..."
+        log_info "未找到离线包，从 GitHub 在线部署..."
 
-        # 下载 CRD
-        kubectl apply -f "https://raw.githubusercontent.com/apache/doris-operator/${operator_version}/config/crd/bases/doris.apache.com_dorisclusters.yaml"
+        # 在线部署 Operator (使用官方 CRD + Operator)
+        kubectl apply -f "https://raw.githubusercontent.com/apache/doris-operator/${OPERATOR_VERSION}/config/crd/bases/doris.apache.com_dorisclusters.yaml"
+        kubectl apply -f "https://raw.githubusercontent.com/apache/doris-operator/${OPERATOR_VERSION}/config/crd/bases/doris.apache.com_dorisdisaggregatedclusters.yaml"
+        kubectl apply -f "https://raw.githubusercontent.com/apache/doris-operator/${OPERATOR_VERSION}/config/operator/operator.yaml"
 
-        # 下载 Operator
-        kubectl apply -f "https://raw.githubusercontent.com/apache/doris-operator/${operator_version}/config/operator/operator.yaml"
-
-        log_info "Operator 部署完成 (在线模式)"
+        log_info "Operator 在线部署完成"
     fi
 
     # 等待 Operator 就绪
     log_info "等待 Operator 启动..."
-    kubectl wait --for=condition=Ready pods -l app.kubernetes.io/name=doris-operator -n doris --timeout=180s || {
+    kubectl wait --for=condition=Ready pods -l app.kubernetes.io/name=doris-operator -n doris-operator-system --timeout=180s || {
         log_error "Operator 启动超时"
-        kubectl get pods -n doris
+        kubectl get pods -n doris-operator-system
         exit 1
     }
 
@@ -240,12 +262,86 @@ deploy_offline_operator() {
 # DorisCluster 部署
 # =============================================================================
 
+# 创建 imagePullSecrets (Nexus 认证)
+create_image_pull_secret() {
+    log_info "创建 imagePullSecret..."
+
+    # 创建 Kubernetes Secret 用于镜像拉取认证
+    kubectl create secret docker-registry doris-registry \
+        --namespace=doris \
+        --docker-server="${NEXUS_REGISTRY}" \
+        --docker-username="${NEXUS_USERNAME}" \
+        --docker-password="${NEXUS_PASSWORD}" \
+        --dry-run=client -o yaml | kubectl apply -f -
+
+    log_info "imagePullSecret 创建完成"
+}
+
+# 部署 ConfigMap（FE/BE 配置文件）
+deploy_configmaps() {
+    log_info "部署 ConfigMap..."
+
+    kubectl apply -f "${SCRIPT_DIR}/configmap.yaml"
+    kubectl apply -f "${SCRIPT_DIR}/configmap-be.yaml"
+
+    log_info "ConfigMap 部署完成"
+}
+
+# 部署 Secret（镜像仓库认证等）
+deploy_secrets() {
+    log_info "部署 Secret..."
+
+    kubectl apply -f "${SCRIPT_DIR}/secret.yaml"
+
+    log_info "Secret 部署完成"
+}
+
+# 部署 Services 和 Ingress
+deploy_services() {
+    log_info "部署 Services 和 Ingress..."
+
+    kubectl apply -f "${SCRIPT_DIR}/services.yaml"
+
+    log_info "Services 部署完成"
+}
+
+# 部署 HPA 自动扩缩容
+deploy_hpa() {
+    log_info "部署 HPA..."
+
+    kubectl apply -f "${SCRIPT_DIR}/hpa.yaml"
+
+    log_info "HPA 部署完成"
+}
+
+# 部署监控组件（Prometheus Operator）
+deploy_monitoring() {
+    log_info "部署监控组件..."
+
+    kubectl apply -f "${SCRIPT_DIR}/monitoring.yaml"
+
+    log_info "监控组件部署完成"
+}
+
+# 部署网络策略
+deploy_network_policy() {
+    log_info "部署网络策略..."
+
+    kubectl apply -f "${SCRIPT_DIR}/network-policy.yaml"
+
+    log_info "网络策略部署完成"
+}
+
 # 部署 DorisCluster
 deploy_doriscluster() {
     log_info "部署 DorisCluster..."
 
-    # 更新 GCS bucket 名称
-    sed "s/doris-data-production/${PROJECT_ID}-doris-data/g" doriscluster.yaml | kubectl apply -f -
+    # 替换镜像地址占位符和 GCS bucket 名称后应用
+    # ${NEXUS_REGISTRY} -> actual registry (e.g., localhost:5000/doris)
+    # ${PROJECT_ID}-doris-data -> actual GCS bucket name
+    sed -e "s|\${NEXUS_REGISTRY}|${NEXUS_REGISTRY}/|g" \
+        -e "s/doris-data-production/${PROJECT_ID}-doris-data/g" \
+        "${SCRIPT_DIR}/doriscluster.yaml" | kubectl apply -f -
 
     log_info "DorisCluster 部署完成"
 }
@@ -328,6 +424,13 @@ main() {
     create_gcs_bucket
     configure_workload_identity
     create_storageclass
+    create_image_pull_secret
+    deploy_configmaps
+    deploy_secrets
+    deploy_services
+    deploy_hpa
+    deploy_monitoring
+    deploy_network_policy
     deploy_offline_operator
     deploy_doriscluster
     wait_for_cluster

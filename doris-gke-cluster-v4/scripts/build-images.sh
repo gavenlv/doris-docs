@@ -49,9 +49,9 @@ OFFLINE_DIR="${PROJECT_DIR}/offline-packages"
 #   - 支持不同环境使用不同配置
 NEXUS_URL="${NEXUS_URL:-nexus.company.com:8082}"  # 镜像仓库地址
 NEXUS_REPO="${NEXUS_REPO:-doris}"                  # 镜像仓库路径
-DORIS_VERSION="${DORIS_VERSION:-2.1.7}"            # Doris 版本
+DORIS_VERSION="${DORIS_VERSION:-4.0.4}"            # Doris 版本
 FDB_VERSION="${FDB_VERSION:-7.1.37}"               # FoundationDB 版本
-OPERATOR_VERSION="${OPERATOR_VERSION:-v1.1.0}"     # Operator 版本
+OPERATOR_VERSION="${OPERATOR_VERSION:-1.4.0}"     # Operator 版本
 
 # 构建模式
 # local: 使用本地离线包
@@ -288,7 +288,7 @@ main() {
     local target="${1:-all}"
 
     echo "=========================================="
-    echo " Doris 2.1.7 安全镜像构建"
+    echo " Doris ${DORIS_VERSION} 安全镜像构建"
     echo "  模式: ${BUILD_MODE}"
     echo "=========================================="
     echo ""

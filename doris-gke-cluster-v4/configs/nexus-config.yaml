@@ -89,8 +89,8 @@ nexus:
     # - org: 组织名，便于分类
     # - version: 版本号
     # - modifier: 版本修饰（如 secure 表示加固版）
-    fe: "nexus.company.com:8082/doris/fe:2.1.7-secure"
-    be: "nexus.company.com:8082/doris/be:2.1.7-secure"
+    fe: "nexus.company.com:8082/doris/fe:4.0.4-secure"
+    be: "nexus.company.com:8082/doris/be:4.0.4-secure"
 
   # 认证信息
   # 为什么需要认证？
@@ -131,7 +131,7 @@ nexus:
 doris:
   # Doris 版本号
   # 必须与镜像版本一致！
-  version: "2.1.7"
+  version: "4.0.4"
 
   # FE 配置
   fe:

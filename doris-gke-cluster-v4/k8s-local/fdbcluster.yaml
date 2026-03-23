@@ -1,0 +1,166 @@
+# =============================================================================
+# FoundationDB 集群配置
+# =============================================================================
+# 作用: 定义 FoundationDB 集群，MetaService 的底层元数据存储
+# 版本: 7.1.37
+# 模式: 3 副本高可用（本地开发降为 1 副本）
+# 存储: 使用 doris-be-storage StorageClass (host-path)
+#
+# 架构说明:
+#   FoundationDB 使用 Raft 协议进行数据复制:
+#   - 数据自动分布在多个节点
+#   - 任意 2 节点故障不影响服务
+#   - 每个节点存储数据分片的不同副本
+#
+# 资源规划 (本地开发):
+#   - 1 副本 (开发测试)
+#   - 每个实例: 1 CPU, 2Gi Memory, 10Gi Storage
+#
+# 资源规划 (生产参考):
+#   - 3 副本 (奇数，容错)
+#   - 每个实例: 4 CPU, 16Gi Memory, 100Gi SSD
+#
+# 部署顺序:
+#   1. kubectl apply -f fdb-operator.yaml
+#   2. kubectl apply -f fdbcluster.yaml
+#   3. 等待就绪: kubectl get fdbcluster -n foundationdb
+# =============================================================================
+
+apiVersion: apps.foundationdb.org/v1beta1
+kind: FoundationDBCluster
+metadata:
+  name: fdb-cluster
+  namespace: foundationdb
+  labels:
+    app.kubernetes.io/name: foundationdb
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: doris
+spec:
+  # FoundationDB 版本
+  version: 7.1.37
+
+  # 镜像配置
+  # 使用官方稳定版镜像
+  image: foundationdb/foundationdb:7.1.37
+
+  # 镜像拉取策略
+  imagePullPolicy: IfNotPresent
+
+  # -----------------------------------------------------------------------------
+  # 进程数量配置
+  # -----------------------------------------------------------------------------
+  # 说明: 定义各类型进程的副本数
+  #   - process_class: 进程类型 (stateless, log, storage, transaction)
+  #   - count: 副本数
+  processCounts:
+    # 存储进程: 存储数据
+    storage: 1          # 本地开发 1 副本; 生产建议 3+
+    # 日志进程: 存储事务日志
+    log: 1              # 本地开发 1 副本; 生产建议 3+
+    # 事务进程: 处理事务协调
+    transaction: 1      # 本地开发 1 副本; 生产建议 3+
+
+  # -----------------------------------------------------------------------------
+  # 数据库配置
+  # -----------------------------------------------------------------------------
+  # 说明: FoundationDB 数据库配置
+  # 高可用配置参考:
+  #   - redundancy_mode: double (2 副本) / triple (3 副本)
+  #   - authorize_newServers_atStartup: true
+  databaseConfiguration:
+    # 冗余模式: double (2 副本) / triple (3 副本)
+    # 本地开发使用 double; 生产使用 triple
+    redundancy_mode: double
+    # 存储引擎: SSD-2 (推荐) / memory (内存)
+    storage_engine: SSD-2
+    # 冲突解决策略: 1 (线性扫描)
+    conflict_resolution_policy: 1
+    # 归档模式: passive (被动) / full (完整) / triple (三重)
+    replication_type: log_only
+
+  # -----------------------------------------------------------------------------
+  # 存储配置
+  # -----------------------------------------------------------------------------
+  # 说明: 使用 host-path 存储 (与 doris-be-storage 相同)
+  storageClass: doris-be-storage
+
+  # 每个存储进程的 PVC 大小
+  # 本地开发: 5Gi
+  # 生产建议: 100Gi+
+  persistentVolumeClaimSpec:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 5Gi
+    # storageClassName: doris-be-storage  # 如果 PVC spec 不支持直接指定
+
+  # -----------------------------------------------------------------------------
+  # 网络配置 (FQDN 模式)
+  # -----------------------------------------------------------------------------
+  routing:
+    # 启用 DNS 访问 (Pod 域名)
+    # 这样 MetaService 可以通过 fdb-cluster.foundationdb.svc.local:4500 访问
+    useDNSInClusterFile: true
+
+  # -----------------------------------------------------------------------------
+  # Pod 配置
+  # -----------------------------------------------------------------------------
+  # 资源限制 (每个进程)
+  # 本地开发: 降低资源占用
+  # 生产: 4 CPU, 16Gi Memory
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+      # 本地 SSD 吞吐
+      ephemeral-storage: 2Gi
+    limits:
+      cpu: 1
+      memory: 2Gi
+      ephemeral-storage: 5Gi
+
+  # Pod 反亲和性 (开发环境禁用，生产启用)
+  # 保证 Pod 分散到不同节点
+  podAntiAffinity:
+    # development: 每个 Pod 一个节点 (允许同节点多个 Pod)
+    # production: 严格分散
+    mode: development
+
+  # 容忍 (允许调度到有污点的节点)
+  tolerations:
+    - key: "node.kubernetes.io/not-ready"
+      operator: "Exists"
+      effect: "NoExecute"
+      tolerationSeconds: 60
+    - key: "node.kubernetes.io/unreachable"
+      operator: "Exists"
+      effect: "NoExecute"
+      tolerationSeconds: 60
+
+  # -----------------------------------------------------------------------------
+  # 日志配置
+  # -----------------------------------------------------------------------------
+  logGroup: foundationdb
+  logLevel: INFO
+
+  # -----------------------------------------------------------------------------
+  # 监控配置
+  # -----------------------------------------------------------------------------
+  # 导出 Prometheus 指标
+  exportMetrics:
+    enabled: true
+  metricsPrefix: foundationdb
+
+  # -----------------------------------------------------------------------------
+  # 升级策略
+  # -----------------------------------------------------------------------------
+  # 滚动升级时最少正常运行时间 (秒)
+  minimumUptimeSecondsBeforeRestart: 60
+
+  # -----------------------------------------------------------------------------
+  # Pod 管理策略
+  # -----------------------------------------------------------------------------
+  # parallel: 同时创建/删除所有 Pod
+  # sequential: 逐个创建/删除
+  podManagementPolicy: Parallel

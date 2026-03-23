@@ -144,8 +144,8 @@ services:
   #   - 方便进入容器内部检查 (docker exec -it test-fe bash)
   test-fe:
     # 使用本地构建的镜像
-    # 构建命令：docker build -t doris-fe:2.1.7 -f docker/fe/Dockerfile .
-    image: doris-fe:2.1.7
+    # 构建命令：docker build -t doris-fe:4.0.4 -f docker/fe/Dockerfile .
+    image: doris-fe:4.0.4
     container_name: doris-test-fe
 
     # 保持容器运行

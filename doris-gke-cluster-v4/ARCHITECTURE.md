@@ -23,19 +23,20 @@
 | 层级 | 组件 | 本地模式 (k8s-local) | 生产模式 (k8s-gke) |
 |------|------|----------------------|---------------------|
 | **容器编排** | Kubernetes | Docker Desktop 内置 (1.34) | GKE (1.28+) |
-| **Doris 核心** | FE (Frontend) | ✅ 1 副本 | ✅ 3 副本 |
-| | BE (Backend) | ✅ 1 副本 | ✅ 3+ 副本 |
+| **Doris 核心** | FE (Frontend) | ✅ 3 副本 | ✅ 3 副本 |
+| | BECN (Backend Compute Node) | ✅ 1 副本 | ✅ 3+ 副本 |
+| | MetaService | ✅ 3 副本 | ✅ 3 副本 |
 | | Doris Operator | ✅ | ✅ |
-| **存储** | emptyDir | ✅ 开发/测试 | ❌ |
-| | Local PV / host-path | ✅ 可选 | ❌ |
+| **存储** | FoundationDB | ✅ MetaService 元数据 | ✅ MetaService 元数据 |
+| | MinIO (S3 兼容) | ✅ BE 数据存储 | ❌ (使用 GCS) |
+| | Local PV / host-path | ✅ | ❌ |
 | | Regional PD (SSD) | ❌ | ✅ FE 元数据 |
 | | GCS (对象存储) | ❌ | ✅ BE 数据 |
-| | MinIO | ❌ 本项目未采用 | ❌ |
 | **监控** | Prometheus | 可选 | ✅ |
 | | Grafana | 可选 | ✅ |
 | **镜像仓库** | Nexus | 可选 | 可选 |
 
-> **重要说明**：本项目本地模式使用 `emptyDir` 存储（数据在 Pod 重启后丢失），不依赖 MinIO。MinIO 仅作为可选的 S3 兼容对象存储备用方案记录在配置中。
+> **架构说明**：本地模式与 GKE 模式采用**相同的存算分离架构**，仅存储后端不同：GKE 使用 GCS，本地使用 MinIO。两套方案接口一致，方便本地调试后直接部署到生产环境。
 
 ---
 
@@ -137,7 +138,7 @@
 **为什么 FE 需要持久化存储？**
 FE 存储 Doris 的元数据（库表定义、用户权限、分区路由等）。如果元数据丢失，整个集群无法恢复，因为 Doris 没有独立的外部 Metastore（不像 Hive 需要 Metastore DB）。
 
-#### BE (Backend) — 后端存储计算节点
+#### BECN (Backend Compute Node) — 后端计算节点（存算分离）
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -178,16 +179,18 @@ FE 存储 Doris 的元数据（库表定义、用户权限、分区路由等）�
 | 项目 | 说明 |
 |------|------|
 | **进程名** | `apache-doris-be` |
-| **核心职责** | 数据存储、列式读取、查询执行、数据压缩 |
+| **核心职责** | 数据计算（不存储数据）、列式读取、查询执行 |
+| **与 BE 的区别** | BECN 是存算分离架构的计算节点，**不存储数据**；数据存在 MinIO/GCS |
 | **监听端口** | 9060 (BE RPC)、9050 (Heartbeat)、8040 (HTTP)、8060 (bRPC)、9070 (Arrow Flight SQL) |
 | **存储格式** | 列式存储 (Segment file, .dat)，支持 ZSTD/LZ4 压缩 |
-| **本地模式配置** | 1 副本，emptyDir（数据不持久化） |
-| **生产模式配置** | 3+ 副本，本地 SSD 缓存热数据 + GCS 存储冷数据 |
+| **本地模式配置** | 1 副本，MinIO 对象存储 + 本地 SSD 缓存 |
+| **生产模式配置** | 3+ 副本，MinIO/GCS 对象存储 + 本地 SSD 缓存热数据 |
 
-**BE 的存储计算分离（生产 GKE 模式）**：
-- **热数据**：本地 SSD 缓存（doris-local-ssd StorageClass），IOPS 高，延迟低
-- **冷数据**：GCS 对象存储（成本低，弹性扩展）
-- **为什么这样设计**：50 亿行数据不可能全放 SSD，通过分层实现成本与性能平衡
+**为什么 BECN 不存储数据？**
+- 存算一体：BE 既是计算节点又是存储节点，扩缩容时需要迁移数据
+- 存算分离：计算和存储独立扩缩容，BECN 可以快速水平扩展，不影响数据
+
+**数据流**：查询执行时，BECN 从 MinIO/GCS 读取数据 → 计算 → 返回结果。
 
 #### MetaService — 存算分离元数据服务
 
@@ -345,20 +348,36 @@ BE Pod 启动，向 FE 注册
 
 ---
 
-### 2.5 可选组件
+### 2.5 核心依赖组件
 
 #### FoundationDB (FDB)
 
 | 项目 | 说明 |
 |------|------|
 | **是什么** | 分布式事务数据库，Apple 开源 |
-| **Doris 中的用途** | 仅在**存算分离模式**下作为 **MetaService 的底层元数据存储** |
-| **被谁使用** | MetaService（见上方章节）|
+| **Doris 中的用途** | **存算分离模式下 MetaService 的底层元数据存储** |
+| **被谁使用** | MetaService |
 | **版本** | 7.1.37 |
-| **本项目状态** | Docker 镜像已在 `docker/fdb/` 中定义，但**当前部署未启用**（默认存算一体模式不需要）|
+| **本项目状态** | 通过 `fdb-operator.yaml` 和 `fdbcluster.yaml` 部署 |
 | **与 etcd 的关系** | 独立于 Kubernetes etcd；etcd 管理 K8s 集群状态，FDB 管理 Doris 存算分离的 Tablet 元数据 |
 
 > **澄清**：FoundationDB **不是**用来替代 etcd 的。Kubernetes 的 etcd 仍然正常运行。FDB 仅在启用存算分离时才需要。
+
+#### MinIO — S3 兼容对象存储
+
+| 项目 | 说明 |
+|------|------|
+| **是什么** | 开源 S3 兼容对象存储，Amazon S3 的自托管替代方案 |
+| **本项目中的角色** | **Doris BECN 的数据存储后端**（替代 GCS/GKE 版本） |
+| **存储内容** | BE 数据文件（Tablet、Segment 等列式存储文件） |
+| **版本** | RELEASE.2024-01-16 |
+| **访问方式** | S3 协议，`http://minio.foundationdb.svc.cluster.local:9000` |
+| **Bucket** | `doris-data` |
+| **凭证** | `minioadmin` / `minioadmin`（开发环境，生产务必修改） |
+| **部署方式** | StatefulSet（单节点独立模式），通过 `minio-statefulset.yaml` 部署 |
+| **与 GKE 的关系** | GKE 版本使用 GCS，本地版本使用 MinIO；两者接口完全一致 |
+
+> **本地与生产一致性**：MinIO 和 GCS 都实现了 S3 API，BECN 配置完全相同（仅 `endpoint` 不同），确保本地调试通过的代码直接部署到 GKE 无需修改。
 
 #### Nexus Repository
 
@@ -389,28 +408,35 @@ BE Pod 启动，向 FE 注册
 │                                                       │
 │  ┌────────────────────────────────────────────────┐ │
 │  │            doris-operator-system                 │ │
-│  │                   Operator Pod                   │ │
+│  │                   Doris Operator Pod              │ │
+│  └────────────────────────────────────────────────┘ │
+│                                                       │
+│  ┌────────────────────────────────────────────────┐ │
+│  │              foundationdb (命名空间)              │ │
+│  │   ┌──────────┐ ┌──────────┐ ┌──────────┐    │ │
+│  │   │ FDB Pod  │ │MinIO Pod │ │MetaService│    │ │
+│  │   │(元数据)  │ │(对象存储) │ │  Pod      │    │ │
+│  │   └──────────┘ └──────────┘ └──────────┘    │ │
 │  └────────────────────────────────────────────────┘ │
 │                                                       │
 │  ┌────────────────────────────────────────────────┐ │
 │  │                   doris (命名空间)               │ │
-│  │                                                  │ │
-│  │   FE Pod (1副本)  ◄──────►  BE Pod (1副本)     │ │
-│  │   emptyDir存储              emptyDir存储          │ │
-│  │   NodePort:32603           ClusterIP             │ │
-│  │                                                  │ │
+│  │   ┌──────────┐ ┌──────────┐                   │ │
+│  │   │ FE Pod   │ │ BECN Pod │                   │ │
+│  │   │(元数据)  │ │ (计算)    │                   │ │
+│  │   └──────────┘ └──────────┘                   │ │
 │  └────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────┘
 ```
 
 | 特点 | 说明 |
 |------|------|
-| **存储** | emptyDir，Pod 重启数据丢失 |
-| **副本数** | FE 1 + BE 1 |
-| **访问方式** | NodePort (绕过 LoadBalancer) |
-| **目的** | 开发调试、快速验证 |
-| **Operator 配置** | 简化版，RBAC 最简要求 |
-| **资源需求** | 4核CPU + 16GB内存 |
+| **架构** | 存算分离（与 GKE 一致） |
+| **存储** | MinIO (BE 数据) + Local PV (FE 元数据缓存) |
+| **副本数** | FE 1 + BECN 1 + MetaService 1 |
+| **访问方式** | NodePort |
+| **目的** | 开发调试，与 GKE 接口一致 |
+| **资源需求** | 8核CPU + 16GB内存 |
 
 ### k8s-gke — GKE 生产模式
 
@@ -444,8 +470,8 @@ BE Pod 启动，向 FE 注册
 
 | 特点 | 说明 |
 |------|------|
-| **存储** | Regional PD (FE) + Local SSD (BE 热数据) + GCS (BE 冷数据) |
-| **副本数** | FE 3 + BE 3+ |
+| **存储** | Regional PD (FE) + Local SSD (BECN 热数据缓存) + GCS (BECN 冷数据) |
+| **副本数** | FE 3 + BECN 3+ + MetaService 3 |
 | **访问方式** | LoadBalancer + Ingress |
 | **目的** | 生产级高可用 |
 | **Operator 配置** | 完整 RBAC + PodDisruptionBudget |

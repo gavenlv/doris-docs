@@ -1,0 +1,425 @@
+# =============================================================================
+# DorisDisaggregatedCluster CRD - 存算分离架构
+# =============================================================================
+# 作用: 定义完整的存算分离 Doris 集群
+# CRD 版本: doris.apache.org/v1
+# 适用: 本地开发/生产环境
+#
+# 架构说明 (与 GKE 存储计算分离架构一致):
+#   ┌─────────────────────────────────────────────────────────────┐
+#   │                     DorisDisaggregatedCluster                │
+#   │                                                             │
+#   │  ┌──────────┐   ┌──────────┐   ┌──────────┐               │
+#   │  │    FE    │   │    FE    │   │    FE    │  (3 副本)    │
+#   │  │ Frontend │◄──│ Frontend │◄──│ Frontend │  (Query)    │
+#   │  └────┬─────┘   └────┬─────┘   └────┬─────┘               │
+#   │       │              │              │                       │
+#   │       └──────────────┼──────────────┘                       │
+#   │                      ▼                                      │
+#   │               ┌────────────┐                               │
+#   │               │MetaService │ (3 副本)                      │
+#   │               │ (FDB 存储) │                               │
+#   │               └─────┬──────┘                               │
+#   │                     │                                       │
+#   │       ┌─────────────┼─────────────┐                        │
+#   │       ▼             ▼             ▼                        │
+#   │  ┌──────────┐ ┌──────────┐ ┌──────────┐                    │
+#   │  │   BECN   │ │   BECN   │ │   BECN   │  (N 副本)        │
+#   │  │ Compute  │ │ Compute  │ │ Compute  │  (仅计算)        │
+#   │  │   Node   │ │   Node   │ │   Node   │                    │
+#   │  └────┬─────┘ └────┬─────┘ └────┬─────┘                    │
+#   │       │            │            │                           │
+#   │       └────────────┼────────────┘                           │
+#   │                    ▼                                        │
+#   │               ┌────────────┐                               │
+#   │               │   MinIO    │  (S3 兼容对象存储)             │
+#   │               │  / GCS     │                               │
+#   │               └────────────┘                               │
+#   └─────────────────────────────────────────────────────────────┘
+#
+# 组件职责:
+#   FE (Frontend): SQL 解析、查询规划、查询协调、元数据管理
+#   MetaService: 存储层元数据 (Tablet 位置、副本信息)
+#   BECN (Backend Compute Node): 数据计算，不存储数据
+#   MinIO: 数据持久化存储 (替代 GCS)
+#   FoundationDB: MetaService 的元数据存储
+#
+# 与 GKE 版本的对比:
+#   | 组件        | GKE 版本          | 本地版本             |
+#   |-------------|-------------------|----------------------|
+#   | 对象存储    | GCS               | MinIO (S3 兼容)      |
+#   | 元数据存储  | FDB               | FDB                  |
+#   | 存储类      | doris-local-ssd   | doris-be-storage     |
+#   | 网络        | VPC / LoadBalancer | NodePort / Ingress   |
+#
+# 部署顺序:
+#   1. kubectl apply -f fdb-operator.yaml
+#   2. kubectl apply -f fdbcluster.yaml
+#   3. kubectl apply -f minio-statefulset.yaml
+#   4. kubectl apply -f doris-disaggregated-cluster.yaml
+# =============================================================================
+
+apiVersion: doris.apache.org/v1
+kind: DorisDisaggregatedCluster
+metadata:
+  name: doris-disagg-cluster
+  namespace: doris
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/managed-by: doris-operator
+    app.kubernetes.io/part-of: doris
+    environment: development
+    # 版本标签
+    doris-version: "4.0.4"
+
+spec:
+  # ---------------------------------------------------------------------------
+  # 集群管理凭证
+  # ---------------------------------------------------------------------------
+  # 用于集群内部认证
+  adminUser:
+    name: root
+    # 生产环境建议使用 Secret
+    # passwordRef: doris-admin-secret
+
+  # ---------------------------------------------------------------------------
+  # FE 配置 - Frontend 节点 (与 GKE 版本一致，仅参数不同)
+  # ---------------------------------------------------------------------------
+  fe:
+    # 副本数: 开发 1 / 生产 3
+    # 高可用要求: 3 副本 (Raft 协议需要奇数)
+    replicas: 3
+
+    # 镜像
+    # 镜像地址由 build-tools/build-all.sh 构建并推送到 Nexus
+    # 部署时会通过 deploy.sh 替换 NEXUS_REGISTRY 占位符
+    image: ${NEXUS_REGISTRY}apache/doris:4.0.4-secure
+
+    # 镜像拉取策略
+    imagePullPolicy: IfNotPresent
+
+    # 资源限制
+    # 开发: 降低资源占用
+    # 生产: 4-8 CPU, 16-32Gi Memory
+    resources:
+      requests:
+        cpu: 1
+        memory: 4Gi
+      limits:
+        cpu: 2
+        memory: 8Gi
+
+    # 存储配置: FE 元数据
+    # 使用 host-path 存储
+    storageClassName: doris-fe-storage
+    storageSize: 10Gi
+
+    # 配置映射
+    configMapInfo:
+      configMapNamespace: doris
+      configMapName: fe-config
+      resolveKey: fe.conf
+
+    # 服务配置
+    service:
+      type: NodePort  # 本地开发使用 NodePort; 生产使用 LoadBalancer
+      ports:
+        - name: query-port
+          port: 9030
+          targetPort: 9030
+        - name: http-port
+          port: 8030
+          targetPort: 8030
+        - name: rpc-port
+          port: 9010
+          targetPort: 9010
+
+    # 探针配置
+    readinessProbe:
+      initialDelaySeconds: 30
+      periodSeconds: 5
+      successThreshold: 3
+      timeoutSeconds: 5
+
+    startupProbe:
+      initialDelaySeconds: 120
+      periodSeconds: 10
+      failureThreshold: 30
+
+    # 环境变量
+    env:
+      - name: JAVA_OPTS
+        value: "-Xmx4g -Xms2g -XX:+UseG1GC"
+
+    # Pod 反亲和性 (开发环境: 不强制)
+    # 生产: PreferNoSchedule
+    affinity:
+      podAntiAffinity:
+        type: PreferNoSchedule
+
+  # ---------------------------------------------------------------------------
+  # BECN 配置 - Backend Compute Node (计算节点，仅做计算)
+  # ---------------------------------------------------------------------------
+  # 说明: BECN 是存算分离架构中的计算节点
+  #       与传统 BE 的区别: BECN 不存储数据，数据存在 MinIO
+  #       查询时从 MinIO 读取数据，计算后返回结果
+  becn:
+    # 副本数: 开发 1 / 生产 3+
+    # 高可用要求: 3 副本
+    replicas: 3
+
+    # 镜像
+    image: ${NEXUS_REGISTRY}apache/doris:4.0.4-secure
+
+    imagePullPolicy: IfNotPresent
+
+    # 资源限制
+    resources:
+      requests:
+        cpu: 2
+        memory: 8Gi
+      limits:
+        cpu: 4
+        memory: 16Gi
+
+    # 本地缓存存储 (用于热数据缓存)
+    # 存算分离模式下，BECN 可以使用本地 SSD 缓存热数据
+    storageClassName: doris-be-storage
+    storageSize: 50Gi
+
+    # 配置映射 (BE 配置)
+    configMapInfo:
+      configMapNamespace: doris
+      configMapName: be-config
+      resolveKey: be.conf
+
+    # 服务配置
+    service:
+      type: ClusterIP
+      ports:
+        - name: be-port
+          port: 9060
+          targetPort: 9060
+        - name: brpc-port
+          port: 9050
+          targetPort: 9050
+        - name: webserver-port
+          port: 8040
+          targetPort: 8040
+        - name: heartbeat-service-port
+          port: 9050
+          targetPort: 9050
+        - name: arrow-flight-sql-port
+          port: 9070
+          targetPort: 9070
+
+    # 探针配置
+    readinessProbe:
+      initialDelaySeconds: 30
+      periodSeconds: 5
+      successThreshold: 3
+      timeoutSeconds: 5
+
+    startupProbe:
+      initialDelaySeconds: 300
+      periodSeconds: 10
+      failureThreshold: 60
+
+    # 环境变量
+    env:
+      - name: JAVA_OPTS
+        value: "-Xmx8g -Xms4g -XX:+UseG1GC"
+
+    # 反亲和性
+    affinity:
+      podAntiAffinity:
+        type: PreferNoSchedule
+
+  # ---------------------------------------------------------------------------
+  # MetaService 配置 - 元数据服务 (高可用)
+  # ---------------------------------------------------------------------------
+  # 说明: MetaService 是存算分离架构的核心组件
+  #       负责管理 Tablet 元数据、副本位置、存储卷映射
+  #       底层使用 FoundationDB 存储元数据
+  metaService:
+    # 副本数: 开发 1 / 生产 3
+    # 高可用要求: 3 副本 (主备模式)
+    replicas: 3
+
+    # 镜像 (包含 MetaService)
+    image: ${NEXUS_REGISTRY}apache/doris:4.0.4-secure
+
+    imagePullPolicy: IfNotPresent
+
+    # 资源限制
+    resources:
+      requests:
+        cpu: 1
+        memory: 2Gi
+      limits:
+        cpu: 2
+        memory: 4Gi
+
+    # 配置: 引用 FDB 集群生成的 ConfigMap
+    # 格式: <cluster-name>-config
+    fdbConfigMapNamespaceName:
+      name: fdb-cluster-config
+      namespace: foundationdb
+
+    # 存储配置
+    storageClassName: doris-fe-storage
+    storageSize: 5Gi
+
+    # 服务配置
+    service:
+      type: ClusterIP
+      ports:
+        - name: brpc
+          port: 5000
+          targetPort: 5000
+
+    # 探针配置
+    readinessProbe:
+      initialDelaySeconds: 30
+      periodSeconds: 5
+      successThreshold: 1
+      timeoutSeconds: 3
+
+    startupProbe:
+      initialDelaySeconds: 60
+      periodSeconds: 10
+      failureThreshold: 30
+
+    # 配置: 自定义 doris_cloud.conf
+    configMaps:
+      - name: metaservice-config
+        mountPath: /etc/doris
+
+    # 存活超时
+    liveTimeout: 30
+    # 启动超时
+    startTimeout: 120
+
+  # ---------------------------------------------------------------------------
+  # 对象存储配置 - S3 兼容存储 (MinIO)
+  # ---------------------------------------------------------------------------
+  # 说明: 与 GKE 版本的 GCS 配置类似，仅 endpoint 和 provider 不同
+  storage:
+    # 存储类型: S3 (兼容 MinIO)
+    type: S3
+
+    # Bucket 名称
+    bucket: doris-data
+
+    # MinIO Service 地址 (Headless Service)
+    # 格式: http://<service>.<namespace>.svc.cluster.local:port
+    endpoint: "http://minio.foundationdb.svc.cluster.local:9000"
+
+    # Region (MinIO 不强制需要，但 Doris 需要)
+    region: us-east-1
+
+    # 访问密钥 (引用 Secret)
+    credential:
+      # 使用 Secret 引用
+      secretRef: minio-credential
+      # 或者直接配置 (不推荐用于生产)
+      # accessKey: minioadmin
+      # secretKey: minioadmin
+
+    # 可选: 路径前缀 (MinIO 中的子目录)
+    prefix: be_data
+
+  # ---------------------------------------------------------------------------
+  # 全局配置
+  # ---------------------------------------------------------------------------
+  global:
+    # 镜像拉取凭证 (Nexus 私有仓库认证)
+    # 由 deploy.sh 的 create_image_pull_secret 函数创建
+    imagePullSecrets:
+      - name: doris-registry
+
+    # 节点选择器 (可选)
+    # nodeSelector:
+    #   disktype: ssd
+
+    # 容忍
+    tolerations:
+      - key: "node.kubernetes.io/not-ready"
+        operator: "Exists"
+        effect: "NoExecute"
+        tolerationSeconds: 60
+
+    # 亲和性
+    affinity: {}
+
+  # ---------------------------------------------------------------------------
+  # 故障恢复配置
+  # ---------------------------------------------------------------------------
+  recovery:
+    enabled: true
+    maxRetry: 5
+    retryInterval: 10m
+
+  # ---------------------------------------------------------------------------
+  # 升级策略
+  # ---------------------------------------------------------------------------
+  upgradePolicy:
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+    timeout: 30m
+
+  # ---------------------------------------------------------------------------
+  # 监控配置
+  # ---------------------------------------------------------------------------
+  # monitoring:
+  #   enabled: true
+  #   prometheus:
+  #     enabled: true
+  #     port: 8040
+  #     path: /metrics
+
+  # ---------------------------------------------------------------------------
+  # 日志配置
+  # ---------------------------------------------------------------------------
+  logging:
+    level: INFO
+    retention: 7
+
+---
+# =============================================================================
+# ConfigMap: MetaService 配置
+# =============================================================================
+# 说明: MetaService 的配置文件 doris_cloud.conf
+# 挂载到 /etc/doris/doris_cloud.conf
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metaservice-config
+  namespace: doris
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/component: meta-service
+    app.kubernetes.io/part-of: doris
+data:
+  doris_cloud.conf: |
+    # MetaService 监听端口
+    brpc_listen_port = 5000
+
+    # BRPC 工作线程数 (-1 = CPU 核心数)
+    brpc_num_threads = -1
+
+    # 日志级别
+    log_level = info
+
+    # 日志目录
+    log_dir = /var/log/doris
+
+    # 最大连接数
+    max_concurrency = 128
+
+    # 事务超时时间 (秒)
+    transaction_timeout = 300
+
+    # Tablet 元数据缓存大小
+    tablet_meta_cache_size = 2147483648  # 2GB
