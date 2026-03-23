@@ -1,80 +1,22 @@
-# =============================================================================
-# Kubernetes 命名空间定义
-# =============================================================================
-#
-# 什么是命名空间 (Namespace)？
-# - Kubernetes 用于隔离资源的逻辑分组
-# - 类似于编程语言中的包或命名空间
-# - 用于组织和管理集群资源
-#
-# 为什么需要单独的命名空间？
-# - 资源隔离：不同环境/项目使用不同命名空间
-# - 访问控制：可以针对命名空间设置 RBAC
-# - 资源配额：可以为命名空间设置资源限制
-# - 方便管理：使用 kubectl -n doris 只查看 doris 相关资源
-#
-# 本文件用途：
-# - 定义 doris 命名空间（用于部署 Doris 集群）
-# - 为开发/测试环境简化配置（不使用 MinIO 等复杂组件）
-# =============================================================================
-
-# -----------------------------------------------------------------------------
-# 命名空间定义
-# -----------------------------------------------------------------------------
-# apiVersion: Kubernetes API 版本
-# kind: 资源类型
-# metadata: 资源的元数据信息
-
 apiVersion: v1
 kind: Namespace
 metadata:
-  # 命名空间名称
   name: doris
-
-  # 标签：用于组织和筛选资源
   labels:
-    # 应用名称标签（推荐实践）
     app.kubernetes.io/name: doris
-    # 管理方式标签
     app.kubernetes.io/managed-by: kubectl
-    # 环境标签（可选：development / staging / production）
     environment: development
-    # 描述性标签
-    app.kubernetes.io/description: "Apache Doris Cluster - Local Development"
+    app.kubernetes.io/description: apache-doris-cluster-local-dev
 
+---
 # =============================================================================
-# 存储类定义 (StorageClass)
+# StorageClass 定义
 # =============================================================================
-#
-# 什么是 StorageClass？
-# - Kubernetes 存储抽象层
-# - 定义不同类型的存储后端
-# - 支持动态卷创建
-#
-# 为什么需要 StorageClass？
-# - Doris FE/BE 需要持久化存储
-# - 不同环境需要不同类型的存储
-# - 实现存储与计算分离
-#
-# 本地开发环境存储方案：
-# - 使用 host-path：简单直接，适合 Docker Desktop
-# - 使用 emptyDir：临时存储，Pod 删除后数据丢失
-# - 生产环境：使用云存储（GCS/GCP、Azure Disk、AWS EBS）
-#
-# 注意事项：
-# - Docker Desktop 的 host-path 存储位于虚拟机内部
-# - 不同存储类型的 I/O 性能差异很大
-# - 生产环境务必使用有持久性的存储
+# 本地开发使用 host-path 存储类
+# 生产环境请使用云存储 (GCE PD / AWS EBS / Azure Disk)
 
-# -----------------------------------------------------------------------------
 # StorageClass - FE 元数据存储
-# -----------------------------------------------------------------------------
-# 作用: 为 FE 元数据提供持久化存储
-# 说明:
-#   - FE 存储 Doris 的元数据（表结构、用户权限等）
-#   - 元数据丢失会导致集群无法恢复
-#   - 开发环境使用 host-path，生产环境使用云存储
-
+# FE 存储元数据（表结构、用户权限等），元数据丢失会导致集群无法恢复
 kind: StorageClass
 apiVersion: storage.k8s.io/v1
 metadata:
@@ -83,24 +25,12 @@ metadata:
     app.kubernetes.io/name: doris
     app.kubernetes.io/component: fe
 provisioner: kubernetes.io/host-path
-# reclaimPolicy: 回收策略
-# - Retain: 保留数据，不自动删除（安全）
-# - Delete: 自动删除（可能丢失数据）
 reclaimPolicy: Retain
-# volumeBindingMode: 卷绑定模式
-# - WaitForFirstConsumer: 延迟绑定，等 Pod 调度后再绑定
-# - Immediate: 立即绑定（可能调度到不合适的节点）
 volumeBindingMode: WaitForFirstConsumer
 
-# -----------------------------------------------------------------------------
+---
 # StorageClass - BE 数据存储
-# -----------------------------------------------------------------------------
-# 作用: 为 BE 数据提供持久化存储
-# 说明:
-#   - BE 存储实际的数据和查询中间结果
-#   - 数据丢失会影响查询但不致命（可从其他 BE 恢复）
-#   - 开发环境使用 host-path，生产环境使用云存储
-
+# BE 存储实际数据和查询中间结果
 kind: StorageClass
 apiVersion: storage.k8s.io/v1
 metadata:
@@ -112,25 +42,12 @@ provisioner: kubernetes.io/host-path
 reclaimPolicy: Retain
 volumeBindingMode: WaitForFirstConsumer
 
+---
 # =============================================================================
 # ServiceAccount 定义
 # =============================================================================
-#
-# 什么是 ServiceAccount？
-# - Pod 访问 Kubernetes API 的身份凭证
-# - 每个 Pod 都有对应的 ServiceAccount
-# - 用于 RBAC 权限控制
-#
-# 为什么需要自定义 ServiceAccount？
-# - Doris Pod 可能需要访问 Kubernetes API
-# - 查看其他 Pod 状态、创建资源等
-# - 通过 RBAC 控制权限范围
-
-# -----------------------------------------------------------------------------
-# FE ServiceAccount
-# -----------------------------------------------------------------------------
-# 说明: FE Pod 使用的 ServiceAccount
-# 用途: Doris Operator 管理 FE Pod 时需要
+# Pod 访问 Kubernetes API 的身份凭证
+# Doris Operator 管理 FE/BE Pod 时需要
 
 apiVersion: v1
 kind: ServiceAccount
@@ -141,12 +58,7 @@ metadata:
     app.kubernetes.io/name: doris
     app.kubernetes.io/component: fe
 
-# -----------------------------------------------------------------------------
-# BE ServiceAccount
-# -----------------------------------------------------------------------------
-# 说明: BE Pod 使用的 ServiceAccount
-# 用途: Doris Operator 管理 BE Pod 时需要
-
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -156,46 +68,32 @@ metadata:
     app.kubernetes.io/name: doris
     app.kubernetes.io/component: be
 
+---
 # =============================================================================
-# RBAC 配置 (Role-Based Access Control)
+# RBAC 配置
 # =============================================================================
-#
-# 什么是 RBAC？
-# - 基于角色的访问控制
-# - 控制 ServiceAccount 对 Kubernetes 资源的访问权限
-#
-# 为什么需要 RBAC？
-# - 安全原则：最小权限原则
-# - Doris Pod 需要查看其他 Pod 状态
-# - Operator 需要管理多种资源
+# 基于角色的访问控制，控制 ServiceAccount 对 K8s 资源的访问权限
+# 遵循最小权限原则
 
-# -----------------------------------------------------------------------------
-# FE RBAC - Role 和 RoleBinding
-# -----------------------------------------------------------------------------
-# 说明: FE Pod 的权限配置
-# 权限范围: 只能在 doris 命名空间内操作
-
+# FE Role - FE Pod 的权限（仅 doris 命名空间内）
 kind: Role
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
   name: doris-fe-role
   namespace: doris
 rules:
-  # 允许操作 pods: 查看状态、监控等
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch"]
-  # 允许操作 services: 服务发现
   - apiGroups: [""]
     resources: ["services"]
     verbs: ["get", "list", "watch"]
-  # 允许更新 pods 状态: 健康检查上报
   - apiGroups: [""]
     resources: ["pods/status"]
     verbs: ["update", "patch"]
 
 ---
-# RoleBinding: 将 Role 绑定到 ServiceAccount
+# FE RoleBinding - 将 Role 绑定到 FE ServiceAccount
 kind: RoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
@@ -210,11 +108,8 @@ roleRef:
   name: doris-fe-role
   apiGroup: rbac.authorization.k8s.io
 
-# -----------------------------------------------------------------------------
-# BE RBAC - Role 和 RoleBinding
-# -----------------------------------------------------------------------------
-# 说明: BE Pod 的权限配置
-
+---
+# BE Role - BE Pod 的权限
 kind: Role
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
@@ -232,6 +127,7 @@ rules:
     verbs: ["update", "patch"]
 
 ---
+# BE RoleBinding - 将 Role 绑定到 BE ServiceAccount
 kind: RoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
@@ -245,29 +141,3 @@ roleRef:
   kind: Role
   name: doris-be-role
   apiGroup: rbac.authorization.k8s.io
-
-# =============================================================================
-# 配置文件说明
-# =============================================================================
-#
-# 本文件包含以下资源类型：
-# 1. Namespace: doris - 应用命名空间
-# 2. StorageClass: doris-fe-storage, doris-be-storage - 存储类
-# 3. ServiceAccount: doris-fe, doris-be - 服务账户
-# 4. Role: doris-fe-role, doris-be-role - 角色定义
-# 5. RoleBinding: doris-fe-rolebinding, doris-be-rolebinding - 角色绑定
-#
-# 部署顺序：
-#   kubectl apply -f 00-namespace.yaml
-#
-# 验证部署：
-#   kubectl get namespace doris
-#   kubectl get storageclass
-#   kubectl get sa -n doris
-#   kubectl get role -n doris
-#   kubectl get rolebinding -n doris
-#
-# 注意事项：
-# - 这些是基础资源配置，先于 DorisCluster 部署
-# - 删除时也要按顺序，先删除 DorisCluster，再删除本文件
-# =============================================================================

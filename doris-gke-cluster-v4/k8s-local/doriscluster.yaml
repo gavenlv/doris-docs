@@ -1,43 +1,24 @@
 # =============================================================================
-# DorisCluster 自定义资源定义 (CRD) - 本地开发配置
+# DorisCluster 自定义资源定义 - 本地开发配置
 # =============================================================================
-#
-# 什么是 DorisCluster？
-# - Apache Doris 官方提供的 Kubernetes Operator
-# - 通过自定义资源管理 Doris 集群生命周期
-# - 自动处理部署、扩缩容、故障恢复等
-#
-# 本配置特点：
-# - 开发环境优化：1 FE + 1 BE，节省资源
-# - 存储方案：emptyDir（数据重启后丢失，仅用于开发）
-# - 访问方式：NodePort（适合 Docker Desktop 环境）
-#
-# 重要概念：
-# - FE (Frontend): 负责 SQL 解析、查询协调、元数据管理
-# - BE (Backend): 负责数据存储、查询执行
-# - emptyDir: 临时存储，Pod 重启后数据丢失
-# - NodePort: 通过节点端口访问服务
 #
 # 部署前提：
 # 1. Doris Operator 已部署 (kubectl apply -f operator.yaml)
 # 2. doris 命名空间已创建 (kubectl apply -f 00-namespace.yaml)
+#
+# 部署命令:
+#   kubectl apply -f doriscluster.yaml
+#
+# 查看状态:
+#   kubectl get dcr -n doris
+#   kubectl get pods -n doris
 # =============================================================================
-
-# -----------------------------------------------------------------------------
-# DorisCluster 资源定义
-# -----------------------------------------------------------------------------
-# apiVersion: Doris Operator v2.x 使用 doris.selectdb.com/v1
-# kind: 资源类型
-# metadata: 资源元数据
 
 apiVersion: doris.selectdb.com/v1
 kind: DorisCluster
 metadata:
-  # 资源名称 - 在命名空间内唯一
   name: doriscluster-local
-  # 所属命名空间
   namespace: doris
-  # 标签 - 用于组织和筛选
   labels:
     app.kubernetes.io/name: doris
     app.kubernetes.io/instance: doriscluster-local
@@ -45,163 +26,69 @@ metadata:
 
 spec:
   # ---------------------------------------------------------------------------
-  # FE 配置 - Frontend 节点规格
+  # FE 配置 - Frontend 节点
   # ---------------------------------------------------------------------------
-  # 说明: FE 负责 SQL 解析、查询协调、元数据管理
-  #       是 Doris 集群的入口点和协调者
+  # FE 负责 SQL 解析、查询协调、元数据管理
+  # 采用 Leader-Follower 模式，开发环境 1 副本即可
   feSpec:
-    # replicas: 副本数量
-    # - 开发环境: 1 (节省资源)
-    # - 生产环境: 至少 3 (高可用需要 odd number)
-    # 注意: FE 采用 Leader-Follower 模式，需要 odd number 保证选举
     replicas: 1
-
-    # image: Docker 镜像
-    # - 使用 Apache 官方镜像
-    # - 格式: apache/doris:fe-{VERSION}
-    # - 本地已下载: apache/doris:fe-3.1.4
     image: apache/doris:fe-3.1.4
-
-    # limits: 资源上限
-    # - 限制 Pod 使用的最大资源
-    # - 超过会被 Kubernetes 限制或驱逐
     limits:
       cpu: 2
       memory: 8Gi
-
-    # requests: 资源请求
-    # - 调度时考虑的最小资源需求
-    # - requests < limits 时允许突发
     requests:
       cpu: 1
       memory: 4Gi
-
-    # service: 服务暴露配置
-    # - 定义 FE 如何对外提供服务
+    # 不使用 configMapInfo，让 FE 使用镜像内默认配置（可写）
+    # ConfigMap 挂载为只读，入口脚本无法修改 fe.conf 会导致启动失败
+    # FE 使用 emptyDir 存储 (开发环境，Pod 重启后数据丢失)
     service:
-      # type: 服务类型
-      # - NodePort: 通过节点端口访问 (适合本地/开发环境)
-      # - ClusterIP: 集群内部访问 (默认)
-      # - LoadBalancer: 云环境使用 (需要云提供商支持)
       type: NodePort
 
-    # storage: 存储配置
-    # - 定义 FE 元数据的存储方式
-    # - 开发环境使用 emptyDir (临时存储)
-    # - 生产环境使用 PVC (持久化存储)
-    volumes:
-      - name: fe-meta
-        # emptyDir: 临时目录，Pod 删除后数据丢失
-        # 优点: 简单，缺点: 数据不持久化
-        emptyDir: {}
-
-    # volumeMounts: 存储挂载
-    # - 将 volumes 中的存储挂载到容器内
-    volumeMounts:
-      - name: fe-meta
-        # mountPath: 容器内的挂载路径
-        mountPath: /opt/doris/fe/doris-meta
-
   # ---------------------------------------------------------------------------
-  # BE 配置 - Backend 节点规格
+  # BE 配置 - Backend 节点
   # ---------------------------------------------------------------------------
-  # 说明: BE 负责数据存储和查询执行
-  #       是 Doris 集群的数据处理节点
+  # BE 负责数据存储和查询执行
   beSpec:
     replicas: 1
-
     image: apache/doris:be-3.1.4
-
     limits:
       cpu: 4
       memory: 16Gi
-
     requests:
       cpu: 2
       memory: 8Gi
-
-    # configMapInfo: 配置映射信息
-    # - 指定使用哪个 ConfigMap 中的配置文件
-    # - 镜像内置配置不可修改时使用
-    configMapInfo:
-      configMapName: be-config
-      resolveKey: be.conf
-
-    # service: 服务暴露配置
+    # 不使用 configMapInfo，使用镜像默认配置
+    # BE 使用 emptyDir 存储 (开发环境)
     service:
       type: ClusterIP
 
-    # storage: 存储配置
-    volumes:
-      - name: be-data
-        emptyDir: {}
-
-    volumeMounts:
-      - name: be-data
-        mountPath: /opt/doris/be/storage
-
-# -----------------------------------------------------------------------------
-# Secret 资源定义 - 敏感信息配置
-# -----------------------------------------------------------------------------
-# 说明: 存储需要保密的信息，如密码、API 密钥等
-#       数据以 base64 编码存储
 ---
+# Secret - MinIO 凭证（开发环境可选，预留字段）
 apiVersion: v1
 kind: Secret
 metadata:
   name: minio-credential
   namespace: doris
 type: Opaque
-# stringData: 明文数据（会自动转为 base64）
-# 说明: 如果同时指定 data 和 stringData，stringData 优先
 stringData:
-  # username: S3/对象存储访问用户名
   username: root
-  # password: S3/对象存储访问密码
-  # 开发环境为空，生产环境务必设置强密码
   password: ""
 
 # =============================================================================
-# 配置参考
+# 资源规划建议
 # =============================================================================
 #
-# 资源规划建议:
-#
-# | 环境 | FE 规格 | BE 规格 | 副本数 |
-# |------|--------|--------|--------|
-# | 开发 | 1核/4Gi | 2核/8Gi | 1 FE + 1 BE |
-# | 测试 | 2核/8Gi | 4核/16Gi | 2 FE + 3 BE |
-# | 生产 | 4核/16Gi | 8核/32Gi | 3 FE + 6 BE |
+# | 环境 | FE 规格        | BE 规格         | 副本数        |
+# |------|---------------|-----------------|--------------|
+# | 开发 | 1-2核 / 4-8Gi | 2-4核 / 8-16Gi  | 1 FE + 1 BE  |
+# | 测试 | 2-4核 / 8-16Gi| 4-8核 / 16-32Gi | 2 FE + 3 BE  |
+# | 生产 | 4-8核 / 16-32Gi| 8-16核 / 32-64Gi| 3 FE + 6+ BE |
 #
 # 端口说明:
-#
-# FE 端口:
-# - http_port: 8030 (Web UI)
-# - query_port: 9030 (MySQL 协议)
-# - rpc_port: 9020 (FE-BE 通信)
-# - edit_log_port: 9010 (FE-FE 通信)
-#
-# BE 端口:
-# - webserver_port: 8040 (状态)
-# - heartbeat_service_port: 9050 (心跳)
-# - brpc_port: 8060 (BE-BE 通信)
-#
-# 部署命令:
-#   kubectl apply -f doriscluster.yaml
-#
-# 查看状态:
-#   kubectl get doriscluster -n doris
-#   kubectl get pods -n doris
-#
-# 查看日志:
-#   kubectl logs doriscluster-local-fe-0 -n doris
-#   kubectl logs doriscluster-local-be-0 -n doris
+# FE: http_port=8030, query_port=9030, rpc_port=9020, edit_log_port=9010
+# BE: webserver_port=8040, heartbeat_service_port=9050, brpc_port=8060
 #
 # 删除集群:
 #   kubectl delete -f doriscluster.yaml
-#
-# 常见问题:
-# 1. FE 启动失败: 检查 ConfigMap 配置是否正确
-# 2. BE 无法连接 FE: 检查 Service 是否正常
-# 3. 存储问题: 确认 StorageClass 存在
 # =============================================================================
