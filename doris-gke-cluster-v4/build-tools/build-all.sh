@@ -1,13 +1,23 @@
 #!/bin/bash
 #
 # build-tools/build-all.sh
-# 完整构建流程：从下载包 → 构建镜像 → 推送 Nexus → 验证
+# 完整构建流程：从本地包 → 构建镜像 → 推送 Nexus → 验证
+#
+# 使用场景：
+#   1. 用户已下载 Doris 包到 offline-packages/ 目录
+#   2. 基于本地包构建 Docker 镜像
+#   3. 推送镜像到本地 Nexus
+#   4. 部署到 K8s (本地或 GKE)
+#
+# 环境要求：
+#   - Docker with buildx
+#   - docker-compose (for Nexus)
 #
 # 用法:
-#   ./build-all.sh                    # 交互模式
-#   ./build-all.sh --local-only       # 仅本地构建，不推 Nexus
-#   ./build-all.sh -- Doris-4.0.4     # 指定版本
-#   ./build-all.sh --skip-build       # 仅推送已构建的镜像
+#   ./build-all.sh                        # 交互模式，使用本地包
+#   ./build-all.sh --local-only          # 仅本地构建，不推 Nexus
+#   ./build-all.sh -- Doris-4.0.4        # 指定版本
+#   ./build-all.sh --skip-build          # 仅推送已构建的镜像
 #
 
 set -euo pipefail
@@ -19,22 +29,24 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# 默认配置
+# Doris 版本 - 统一使用 4.0.4
 DORIS_VERSION="${DORIS_VERSION:-4.0.4}"
 OPERATOR_VERSION="${OPERATOR_VERSION:-1.4.0}"
 FDB_VERSION="${FDB_VERSION:-7.1.37}"
 
+# Nexus 配置 (默认本地)
 NEXUS_HOST="${NEXUS_HOST:-localhost:5000}"
 NEXUS_URL="http://${NEXUS_HOST}"
 
+# 镜像标签
 REGISTRY_PREFIX="${NEXUS_HOST}/doris"
 FE_IMAGE="${REGISTRY_PREFIX}/fe:${DORIS_VERSION}"
 BE_IMAGE="${REGISTRY_PREFIX}/be:${DORIS_VERSION}"
 OPERATOR_IMAGE="${REGISTRY_PREFIX}/operator:${OPERATOR_VERSION}"
 FDB_IMAGE="${REGISTRY_PREFIX}/fdb:${FDB_VERSION}"
 
-# 本地包目录（用户预先放置下载的 Doris 二进制包）
-SOURCE_PACKAGE_DIR="${SOURCE_PACKAGE_DIR:-${PROJECT_ROOT}/source-packages}"
+# 本地包目录
+OFFLINE_PACKAGE_DIR="${OFFLINE_PACKAGE_DIR:-${PROJECT_ROOT}/../offline-packages}"
 BUILD_OUTPUT_DIR="${BUILD_OUTPUT_DIR:-${PROJECT_ROOT}/build-output}"
 
 # 动作标志
@@ -91,7 +103,6 @@ parse_args() {
                 exit 1
                 ;;
             *)
-                # 第一个非选项参数是版本号
                 if [[ -z "${DORIS_VERSION:-}" ]] || [[ "$1" =~ ^[0-9]+\.[0-9]+ ]]; then
                     DORIS_VERSION="$1"
                     FE_IMAGE="${REGISTRY_PREFIX}/fe:${DORIS_VERSION}"
@@ -111,8 +122,7 @@ check_prerequisites() {
     log_info "检查前置条件..."
 
     local missing=()
-
-    for cmd in docker buildx curl jq tar gzip; do
+    for cmd in docker buildx curl tar gzip; do
         if ! command -v "$cmd" &> /dev/null; then
             missing+=("$cmd")
         fi
@@ -123,39 +133,48 @@ check_prerequisites() {
         exit 1
     fi
 
-    # 检查 Docker buildx 是否可用
     if ! docker buildx version &> /dev/null; then
         log_error "Docker buildx 未启用。请运行: docker buildx install"
         exit 1
     fi
 
-    # 检查源码包
     if [[ "$SKIP_BUILD" == "false" ]]; then
-        if [[ ! -d "$SOURCE_PACKAGE_DIR" ]]; then
-            log_warn "源码包目录不存在: $SOURCE_PACKAGE_DIR"
-            log_warn "将在当前目录创建，请将 Apache Doris 二进制包放入其中"
-            mkdir -p "$SOURCE_PACKAGE_DIR"
-        fi
-
-        local fe_pkg=$(find "$SOURCE_PACKAGE_DIR" -name "*doris*fe*.tar.xz" -o -name "*doris*fe*.tar.gz" 2>/dev/null | head -1)
-        local be_pkg=$(find "$SOURCE_PACKAGE_DIR" -name "*doris*be*.tar.xz" -o -name "*doris*be*.tar.gz" 2>/dev/null | head -1)
-
-        if [[ -z "$fe_pkg" ]] || [[ -z "$be_pkg" ]]; then
-            log_error "未找到 Doris FE/BE 源码包。"
-            log_error "请从 https://doris.apache.org/zh-CN/download/ 下载 Apache Doris 4.0.4 并放入:"
-            log_error "  $SOURCE_PACKAGE_DIR"
-            log_error "需要包含: apache-doris-fe-*.tar.gz 和 apache-doris-be-*.tar.gz"
-            exit 1
-        fi
-
-        log_ok "源码包检查通过"
-        log_info "  FE: $(basename "$fe_pkg")"
-        log_info "  BE: $(basename "$be_pkg")"
+        check_local_packages
     fi
 }
 
 # =============================================================================
-# 启动 Nexus（docker-compose）
+# 检查本地包
+# =============================================================================
+
+check_local_packages() {
+    log_info "检查本地包目录: $OFFLINE_PACKAGE_DIR"
+
+    if [[ ! -d "$OFFLINE_PACKAGE_DIR" ]]; then
+        mkdir -p "$OFFLINE_PACKAGE_DIR"
+        log_warn "已创建离线包目录: $OFFLINE_PACKAGE_DIR"
+        log_warn "请将 Apache Doris 4.0.4 包放入此目录"
+    fi
+
+    local package_name="apache-doris-${DORIS_VERSION}-bin-x64.tar.gz"
+    local package_path="${OFFLINE_PACKAGE_DIR}/${package_name}"
+
+    if [[ -f "$package_path" ]]; then
+        log_ok "找到本地包: $package_name"
+        SOURCE_TAR="$package_path"
+    else
+        log_error "未找到本地包: $package_path"
+        log_error "请从 https://doris.apache.org/zh-CN/download/ 下载 Apache Doris ${DORIS_VERSION}"
+        log_error "并重命名为: $package_name"
+        log_error "放入目录: $OFFLINE_PACKAGE_DIR"
+        exit 1
+    fi
+
+    log_info "使用本地包: $(basename "$SOURCE_TAR")"
+}
+
+# =============================================================================
+# 启动 Nexus (docker-compose)
 # =============================================================================
 
 start_nexus() {
@@ -173,21 +192,18 @@ start_nexus() {
         exit 1
     fi
 
-    # 启动 Nexus
     docker compose -f "$nexus_compose" up -d
 
-    # 等待 Nexus 就绪
     log_info "等待 Nexus 启动就绪..."
-    local max_wait=60
+    local max_wait=120
     local count=0
     while [[ $count -lt $max_wait ]]; do
-        if curl -s "${NEXUS_URL}/repository/doris-docker/" &> /dev/null || \
-           curl -s -o /dev/null -w "%{http_code}" "${NEXUS_URL}/" | grep -q "200\|401"; then
-            log_ok "Nexus 已就绪"
+        if curl -s -o /dev/null -w "%{http_code}" "${NEXUS_URL}/" | grep -q "200\|401"; then
+            log_ok "Nexus 已就绪 (${NEXUS_URL})"
             return
         fi
-        sleep 2
-        count=$((count + 2))
+        sleep 3
+        count=$((count + 3))
         echo -n "."
     done
 
@@ -196,20 +212,17 @@ start_nexus() {
 }
 
 # =============================================================================
-# 登录 Nexus
+# 配置 Nexus Docker Registry
 # =============================================================================
 
-nexus_login() {
-    log_info "登录 Nexus..."
+configure_nexus_docker() {
+    log_info "配置 Nexus Docker Registry..."
 
     local admin_password="${NEXUS_PASSWORD:-admin123}"
 
-    # 尝试登录
-    if docker login "${NEXUS_HOST}" -u admin -p "$admin_password" &> /dev/null; then
-        log_ok "Nexus 登录成功"
-    else
-        log_warn "Nexus 登录失败，尝试匿名推送..."
-    fi
+    sleep 5
+
+    docker login "${NEXUS_HOST}" -u admin -p "$admin_password" 2>/dev/null || true
 }
 
 # =============================================================================
@@ -223,99 +236,45 @@ build_images() {
     fi
 
     log_info "开始构建镜像 (Doris ${DORIS_VERSION})..."
+    log_info "使用本地包: $SOURCE_TAR"
 
-    # 创建输出目录
     mkdir -p "$BUILD_OUTPUT_DIR"
 
-    # 确保 buildx builder 可用
-    docker buildx use default 2>/dev/null || docker buildx create --name mybuilder --use 2>/dev/null || true
+    docker buildx use default 2>/dev/null || \
+        docker buildx create --name mybuilder --use 2>/dev/null || true
     docker buildx inspect --bootstrap &> /dev/null || true
-
-    local fe_pkg be_pkg
-    fe_pkg=$(find "$SOURCE_PACKAGE_DIR" -name "*doris*fe*.tar.xz" -o -name "*doris*fe*.tar.gz" 2>/dev/null | head -1)
-    be_pkg=$(find "$SOURCE_PACKAGE_DIR" -name "*doris*be*.tar.xz" -o -name "*doris*be*.tar.gz" 2>/dev/null | head -1)
 
     # --- 构建 FE 镜像 ---
     log_info "构建 FE 镜像: ${FE_IMAGE}"
-    docker build \
+    docker buildx build \
         --build-arg DORIS_VERSION="$DORIS_VERSION" \
-        --build-arg SOURCE_TAR="$fe_pkg" \
+        --build-arg SOURCE_TAR="$SOURCE_TAR" \
         -t "${FE_IMAGE}" \
         -f "${PROJECT_ROOT}/docker/fe/Dockerfile" \
         "${PROJECT_ROOT}" \
-        --progress=plain
+        --progress=plain \
+        --load
 
     log_ok "FE 镜像构建完成: ${FE_IMAGE}"
 
     # --- 构建 BE 镜像 ---
     log_info "构建 BE 镜像: ${BE_IMAGE}"
-    docker build \
+    docker buildx build \
         --build-arg DORIS_VERSION="$DORIS_VERSION" \
-        --build-arg SOURCE_TAR="$be_pkg" \
+        --build-arg SOURCE_TAR="$SOURCE_TAR" \
         -t "${BE_IMAGE}" \
         -f "${PROJECT_ROOT}/docker/be/Dockerfile" \
         "${PROJECT_ROOT}" \
-        --progress=plain
+        --progress=plain \
+        --load
 
     log_ok "BE 镜像构建完成: ${BE_IMAGE}"
-
-    # --- 构建 FDB 镜像 ---
-    log_info "构建 FDB 镜像: ${FDB_IMAGE}"
-    docker build \
-        --build-arg FDB_VERSION="$FDB_VERSION" \
-        -t "${FDB_IMAGE}" \
-        -f "${PROJECT_ROOT}/docker/fdb/Dockerfile" \
-        "${PROJECT_ROOT}" \
-        --progress=plain
-
-    log_ok "FDB 镜像构建完成: ${FDB_IMAGE}"
-
-    # --- 构建 Operator 镜像 ---
-    log_info "构建 Operator 镜像: ${OPERATOR_IMAGE}"
-    build_operator_image
 
     log_ok "所有镜像构建完成！"
     echo ""
     echo "镜像列表:"
-    echo "  FE       -> ${FE_IMAGE}"
-    echo "  BE       -> ${BE_IMAGE}"
-    echo "  FDB      -> ${FDB_IMAGE}"
-    echo "  Operator -> ${OPERATOR_IMAGE}"
-}
-
-# =============================================================================
-# 构建 Operator 镜像（从离线包）
-# =============================================================================
-
-build_operator_image() {
-    local offline_bundle="${SOURCE_PACKAGE_DIR}/doris-operator-bundle-${OPERATOR_VERSION}.tar.gz"
-
-    if [[ -f "$offline_bundle" ]]; then
-        tar -xzf "$offline_bundle" -C "$BUILD_OUTPUT_DIR"
-        local operator_path="${BUILD_OUTPUT_DIR}/doris-operator"
-    else
-        log_warn "未找到 Operator 离线包，将使用在线构建"
-        # 从 GitHub 下载 operator
-        local operator_url="https://github.com/selectdb/doris-operator/releases/download/${OPERATOR_VERSION}/doris-operator-${OPERATOR_VERSION}.tar.gz"
-        log_info "下载 Doris Operator: $operator_url"
-
-        mkdir -p "${BUILD_OUTPUT_DIR}/doris-operator"
-        if curl -L "$operator_url" -o "${BUILD_OUTPUT_DIR}/operator.tar.gz" 2>/dev/null; then
-            tar -xzf "${BUILD_OUTPUT_DIR}/operator.tar.gz" -C "${BUILD_OUTPUT_DIR}/doris-operator"
-            local operator_path="${BUILD_OUTPUT_DIR}/doris-operator"
-        else
-            log_error "无法下载 Operator"
-            return 1
-        fi
-    fi
-
-    if [[ -d "$operator_path" ]]; then
-        docker build \
-            -t "${OPERATOR_IMAGE}" \
-            -f "${operator_path}/docker/Dockerfile" \
-            "${operator_path}" \
-            --progress=plain
-    fi
+    echo "  FE -> ${FE_IMAGE}"
+    echo "  BE -> ${BE_IMAGE}"
 }
 
 # =============================================================================
@@ -330,15 +289,9 @@ push_images() {
 
     log_info "推送镜像到 Nexus: ${NEXUS_URL}"
 
-    # 标记镜像为多架构
-    for img in "${FE_IMAGE}" "${BE_IMAGE}" "${FDB_IMAGE}" "${OPERATOR_IMAGE}"; do
+    for img in "${FE_IMAGE}" "${BE_IMAGE}"; do
         log_info "推送: $img"
-
-        if docker tag "$(docker images -q $img)" "${NEXUS_HOST}/$(basename $img)"; then
-            docker push "$img" --all-tags
-        else
-            docker push "$img"
-        fi
+        docker push "$img"
     done
 
     log_ok "所有镜像推送完成！"
@@ -351,7 +304,7 @@ push_images() {
 verify_images() {
     log_info "验证镜像..."
 
-    local images=("$FE_IMAGE" "$BE_IMAGE" "$FDB_IMAGE" "$OPERATOR_IMAGE")
+    local images=("${FE_IMAGE}" "${BE_IMAGE}")
     local all_ok=true
 
     for img in "${images[@]}"; do
@@ -372,40 +325,51 @@ verify_images() {
 }
 
 # =============================================================================
-# 生成镜像配置（供部署脚本使用）
+# 生成部署配置
 # =============================================================================
 
-generate_image_config() {
-    local output="${BUILD_OUTPUT_DIR}/image-config.env"
+generate_deploy_config() {
+    local output="${BUILD_OUTPUT_DIR}/deploy-config.env"
 
     cat > "$output" << EOF
-# 自动生成的镜像配置
-# 由 build-tools/build-all.sh 生成
+# Doris 镜像部署配置
+# 由 build-tools/build-all.sh 自动生成
 # 时间: $(date -u '+%Y-%m-%dT%H:%M:%SZ')
 
+# =============================================================================
+# 版本信息
+# =============================================================================
 DORIS_VERSION=${DORIS_VERSION}
 OPERATOR_VERSION=${OPERATOR_VERSION}
 FDB_VERSION=${FDB_VERSION}
 
+# =============================================================================
+# Nexus 配置
+# =============================================================================
 NEXUS_HOST=${NEXUS_HOST}
 NEXUS_URL=${NEXUS_URL}
-REGISTRY_PREFIX=${REGISTRY_PREFIX}
+NEXUS_REGISTRY=${NEXUS_HOST}/doris
 
+# =============================================================================
+# 镜像地址 (从 Nexus 拉取)
+# =============================================================================
 FE_IMAGE=${FE_IMAGE}
 BE_IMAGE=${BE_IMAGE}
-OPERATOR_IMAGE=${OPERATOR_IMAGE}
-FDB_IMAGE=${FDB_IMAGE}
 
-# K8s 部署使用的镜像（从 Nexus 拉取）
-# 用于 k8s-local 和 k8s-gke 的 imagePullSecrets
-K8S_IMAGE_PULL_SECRET=doris-registry
+# =============================================================================
+# Kubernetes 部署示例
+# =============================================================================
+# 在 k8s-local 或 k8s-gke 部署前，设置环境变量：
+#   export NEXUS_REGISTRY=${NEXUS_HOST}/doris
+#
+# 或在 deploy.sh 中替换 \${NEXUS_REGISTRY} 为实际地址
 EOF
 
-    log_ok "镜像配置已生成: $output"
+    log_ok "部署配置已生成: $output"
     echo ""
-    echo "部署时请设置环境变量或在 Kubernetes Secret 中配置 Nexus 凭证"
-    echo "  export NEXUS_HOST=${NEXUS_HOST}"
-    echo "  export NEXUS_PASSWORD=admin123"
+    echo "使用方式:"
+    echo "  source $output"
+    echo "  export NEXUS_REGISTRY=${NEXUS_HOST}/doris"
 }
 
 # =============================================================================
@@ -415,8 +379,9 @@ EOF
 main() {
     echo ""
     echo "=========================================="
-    echo "  Doris 镜像构建工具 (build-all.sh)"
+    echo "  Doris 镜像构建工具"
     echo "  版本: ${DORIS_VERSION}"
+    echo "  本地包: ${OFFLINE_PACKAGE_DIR}"
     echo "  Nexus: ${NEXUS_URL}"
     echo "=========================================="
     echo ""
@@ -424,16 +389,22 @@ main() {
     parse_args "$@"
     check_prerequisites
     start_nexus
-    nexus_login
+    configure_nexus_docker
     build_images
     push_images
     verify_images
-    generate_image_config
+    generate_deploy_config
 
     echo ""
     echo "=========================================="
     log_ok "构建完成！"
     echo "=========================================="
+    echo ""
+    echo "下一步:"
+    echo "  1. 启动 Nexus: docker compose -f nexus-docker-compose.yaml up -d"
+    echo "  2. 部署到 K8s:"
+    echo "     - 本地: cd ../k8s-local && ./deploy.sh"
+    echo "     - GKE:  cd ../k8s-gke && ./deploy.sh"
 }
 
 main "$@"

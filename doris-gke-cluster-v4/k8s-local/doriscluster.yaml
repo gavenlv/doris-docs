@@ -32,7 +32,9 @@ spec:
   # 采用 Leader-Follower 模式，开发环境 1-3 副本
   feSpec:
     replicas: 1
-    image: ${NEXUS_REGISTRY}apache/doris:4.0.4-secure
+    image: ${NEXUS_REGISTRY}/apache/doris:4.0.4-secure
+    imagePullSecrets:
+      - name: doris-registry
     limits:
       cpu: 2
       memory: 8Gi
@@ -48,7 +50,9 @@ spec:
   # BE 负责数据存储和查询执行
   beSpec:
     replicas: 1
-    image: ${NEXUS_REGISTRY}apache/doris:4.0.4-secure
+    image: ${NEXUS_REGISTRY}/apache/doris:4.0.4-secure
+    imagePullSecrets:
+      - name: doris-registry
     limits:
       cpu: 4
       memory: 16Gi

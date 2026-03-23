@@ -57,7 +57,9 @@ spec:
     # 说明: Doris FE 镜像
     # 镜像地址由 build-tools/build-all.sh 构建并推送到 Nexus
     # 部署时会通过 deploy.sh 替换 NEXUS_REGISTRY 占位符
-    image: ${NEXUS_REGISTRY}apache/doris:4.0.4-secure
+    image: ${NEXUS_REGISTRY}/apache/doris:4.0.4-secure
+    imagePullSecrets:
+      - name: doris-registry
 
     # 资源限制
     # 说明: Container 资源请求和限制
@@ -204,7 +206,9 @@ spec:
     # 镜像配置
     # 镜像地址由 build-tools/build-all.sh 构建并推送到 Nexus
     # 部署时会通过 deploy.sh 替换 NEXUS_REGISTRY 占位符
-    image: ${NEXUS_REGISTRY}apache/doris:4.0.4-secure
+    image: ${NEXUS_REGISTRY}/apache/doris:4.0.4-secure
+    imagePullSecrets:
+      - name: doris-registry
 
     # 资源限制
     # 说明: Container 资源请求和限制

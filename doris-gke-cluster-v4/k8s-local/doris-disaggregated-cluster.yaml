@@ -93,7 +93,9 @@ spec:
     # 镜像
     # 镜像地址由 build-tools/build-all.sh 构建并推送到 Nexus
     # 部署时会通过 deploy.sh 替换 NEXUS_REGISTRY 占位符
-    image: ${NEXUS_REGISTRY}apache/doris:4.0.4-secure
+    image: ${NEXUS_REGISTRY}/apache/doris:4.0.4-secure
+    imagePullSecrets:
+      - name: doris-registry
 
     # 镜像拉取策略
     imagePullPolicy: IfNotPresent
@@ -169,7 +171,9 @@ spec:
     replicas: 3
 
     # 镜像
-    image: ${NEXUS_REGISTRY}apache/doris:4.0.4-secure
+    image: ${NEXUS_REGISTRY}/apache/doris:4.0.4-secure
+    imagePullSecrets:
+      - name: doris-registry
 
     imagePullPolicy: IfNotPresent
 
@@ -247,7 +251,9 @@ spec:
     replicas: 3
 
     # 镜像 (包含 MetaService)
-    image: ${NEXUS_REGISTRY}apache/doris:4.0.4-secure
+    image: ${NEXUS_REGISTRY}/apache/doris:4.0.4-secure
+    imagePullSecrets:
+      - name: doris-registry
 
     imagePullPolicy: IfNotPresent
 
