@@ -51,12 +51,12 @@
 #   └───────────────┘   └───────────────┘   └───────────────┘
 #
 # 版本信息：
-#   - Operator 版本：25.8.0
-#   - 支持的 Doris 版本：2.0.x, 2.1.x, 3.0.x
-#   - API 版本：doris.selectdb.com/v1
+#   - Operator 版本：1.4.0
+#   - 支持的 Doris 版本：4.0.x
+#   - API 版本：doris.apache.com/v1
 #
 # 离线部署说明：
-#   - 使用本地镜像（apache/doris:operator-25.8.0）
+#   - 使用本地镜像（apache/doris:operator-1.4.0）
 #   - 避免从远程仓库拉取镜像
 #   - 需要预先加载镜像到 Docker
 #
@@ -89,7 +89,78 @@ metadata:
     # 应用名称（推荐标签）
     app.kubernetes.io/name: doris-operator
     # 版本标签（便于追踪）
-    app.kubernetes.io/version: "25.8.0"
+    app.kubernetes.io/version: "1.4.0"
+
+---
+
+# =============================================================================
+# CRD 定义 - 必须在 Operator 部署前应用
+# =============================================================================
+
+---
+# DorisDisaggregatedCluster CRD - 存算分离集群
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: dorisdisaggregatedclusters.doris.apache.com
+  labels:
+    app.kubernetes.io/name: doris-operator
+    app.kubernetes.io/version: "1.4.0"
+spec:
+  group: doris.apache.com
+  names:
+    kind: DorisDisaggregatedCluster
+    listKind: DorisDisaggregatedClusterList
+    plural: dorisdisaggregatedclusters
+    singular: dorisdisaggregatedcluster
+    shortNames:
+      - disagg
+      - disaggcluster
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+            status:
+              type: object
+
+---
+# DorisCluster CRD - 传统集群
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: dorisclusters.doris.apache.com
+  labels:
+    app.kubernetes.io/name: doris-operator
+    app.kubernetes.io/version: "1.4.0"
+spec:
+  group: doris.apache.com
+  names:
+    kind: DorisCluster
+    listKind: DorisClusterList
+    plural: dorisclusters
+    singular: doriscluster
+    shortNames:
+      - doris
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+            status:
+              type: object
 
 ---
 
@@ -117,7 +188,7 @@ metadata:
   namespace: doris-operator-system
   labels:
     app.kubernetes.io/name: doris-operator
-    app.kubernetes.io/version: "25.8.0"
+    app.kubernetes.io/version: "1.4.0"
 
 ---
 
@@ -145,7 +216,7 @@ metadata:
   name: doris-operator
   labels:
     app.kubernetes.io/name: doris-operator
-    app.kubernetes.io/version: "25.8.0"
+    app.kubernetes.io/version: "1.4.0"
 
 rules:
   # =====================================================================
@@ -164,14 +235,27 @@ rules:
   # 为什么需要这些权限？
   #   - Operator 需要 CRUD DorisCluster 资源
   #   - 需要更新 status 和 finalizers
-  - apiGroups: ["doris.selectdb.com"]
+  - apiGroups: ["doris.apache.com"]
     resources: ["dorisclusters"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["doris.selectdb.com"]
+  - apiGroups: ["doris.apache.com"]
     resources: ["dorisclusters/status"]
     verbs: ["get", "update", "patch"]
-  - apiGroups: ["doris.selectdb.com"]
+  - apiGroups: ["doris.apache.com"]
     resources: ["dorisclusters/finalizers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # =====================================================================
+  # DorisDisaggregatedCluster CRD - 存算分离资源权限
+  # =====================================================================
+  - apiGroups: ["doris.apache.com"]
+    resources: ["dorisdisaggregatedclusters"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["doris.apache.com"]
+    resources: ["dorisdisaggregatedclusters/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["doris.apache.com"]
+    resources: ["dorisdisaggregatedclusters/finalizers"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
   # =====================================================================
@@ -373,7 +457,7 @@ metadata:
   namespace: doris-operator-system
   labels:
     app.kubernetes.io/name: doris-operator
-    app.kubernetes.io/version: "25.8.0"
+    app.kubernetes.io/version: "1.4.0"
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -407,7 +491,7 @@ metadata:
   namespace: doris-operator-system
   labels:
     app.kubernetes.io/name: doris-operator
-    app.kubernetes.io/version: "25.8.0"
+    app.kubernetes.io/version: "1.4.0"
     app.kubernetes.io/component: operator
 spec:
   # 副本数
@@ -424,14 +508,14 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: doris-operator
-      app.kubernetes.io/version: "25.8.0"
+      app.kubernetes.io/version: "1.4.0"
 
   # Pod 模板
   template:
     metadata:
       labels:
         app.kubernetes.io/name: doris-operator
-        app.kubernetes.io/version: "25.8.0"
+        app.kubernetes.io/version: "1.4.0"
         app.kubernetes.io/component: operator
     spec:
       # 关联 ServiceAccount
@@ -446,7 +530,7 @@ spec:
           # 为什么使用特定版本？
           #   - 避免 latest 标签的不确定性
           #   - 便于回滚和问题排查
-          image: apache/doris:operator-25.8.0
+          image: apache/doris:operator-1.4.0
 
           # 镜像拉取策略
           # IfNotPresent 原因：
@@ -539,7 +623,7 @@ metadata:
   namespace: doris-operator-system
   labels:
     app.kubernetes.io/name: doris-operator
-    app.kubernetes.io/version: "25.8.0"
+    app.kubernetes.io/version: "1.4.0"
 spec:
   # Service 类型
   # ClusterIP 原因：
@@ -559,7 +643,7 @@ spec:
   #   - 匹配带有特定标签的 Operator Pod
   selector:
     app.kubernetes.io/name: doris-operator
-    app.kubernetes.io/version: "25.8.0"
+    app.kubernetes.io/version: "1.4.0"
 
 # =============================================================================
 # 部署验证

@@ -46,7 +46,7 @@ OPERATOR_IMAGE="${REGISTRY_PREFIX}/operator:${OPERATOR_VERSION}"
 FDB_IMAGE="${REGISTRY_PREFIX}/fdb:${FDB_VERSION}"
 
 # 本地包目录
-OFFLINE_PACKAGE_DIR="${OFFLINE_PACKAGE_DIR:-${PROJECT_ROOT}/../offline-packages}"
+OFFLINE_PACKAGE_DIR="${OFFLINE_PACKAGE_DIR:-${PROJECT_ROOT}/offline-packages}"
 BUILD_OUTPUT_DIR="${BUILD_OUTPUT_DIR:-${PROJECT_ROOT}/build-output}"
 
 # 动作标志
@@ -270,11 +270,25 @@ build_images() {
 
     log_ok "BE 镜像构建完成: ${BE_IMAGE}"
 
+    # --- 构建 FDB 镜像 ---
+    log_info "构建 FDB 镜像: ${FDB_IMAGE}"
+    docker buildx build \
+        --build-arg FDB_VERSION="$FDB_VERSION" \
+        --build-arg OFFLINE_PATH="$OFFLINE_PACKAGE_DIR" \
+        -t "${FDB_IMAGE}" \
+        -f "${PROJECT_ROOT}/docker/fdb/Dockerfile" \
+        "${PROJECT_ROOT}" \
+        --progress=plain \
+        --load
+
+    log_ok "FDB 镜像构建完成: ${FDB_IMAGE}"
+
     log_ok "所有镜像构建完成！"
     echo ""
     echo "镜像列表:"
     echo "  FE -> ${FE_IMAGE}"
     echo "  BE -> ${BE_IMAGE}"
+    echo "  FDB -> ${FDB_IMAGE}"
 }
 
 # =============================================================================
@@ -289,7 +303,7 @@ push_images() {
 
     log_info "推送镜像到 Nexus: ${NEXUS_URL}"
 
-    for img in "${FE_IMAGE}" "${BE_IMAGE}"; do
+    for img in "${FE_IMAGE}" "${BE_IMAGE}" "${FDB_IMAGE}"; do
         log_info "推送: $img"
         docker push "$img"
     done
@@ -304,7 +318,7 @@ push_images() {
 verify_images() {
     log_info "验证镜像..."
 
-    local images=("${FE_IMAGE}" "${BE_IMAGE}")
+    local images=("${FE_IMAGE}" "${BE_IMAGE}" "${FDB_IMAGE}")
     local all_ok=true
 
     for img in "${images[@]}"; do

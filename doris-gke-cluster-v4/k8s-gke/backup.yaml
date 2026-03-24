@@ -150,7 +150,7 @@ spec:
               #   - FE 镜像已包含 mysql CLI
               #   - 减少镜像数量
               #   - 环境一致性好
-              image: apache/doris:fe-3.1.4
+              image: apache/doris:4.0.4
 
               # 命令说明：
               #   bash -c: 执行 shell 命令

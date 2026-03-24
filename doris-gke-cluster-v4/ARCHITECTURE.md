@@ -24,7 +24,7 @@
 |------|------|----------------------|---------------------|
 | **容器编排** | Kubernetes | Docker Desktop 内置 (1.34) | GKE (1.28+) |
 | **Doris 核心** | FE (Frontend) | ✅ 3 副本 | ✅ 3 副本 |
-| | BECN (Backend Compute Node) | ✅ 1 副本 | ✅ 3+ 副本 |
+| | BECN (Backend Compute Node) | ✅ 3 副本 (HA) | ✅ 3+ 副本 (HA) |
 | | MetaService | ✅ 3 副本 | ✅ 3 副本 |
 | | Doris Operator | ✅ | ✅ |
 | **存储** | FoundationDB | ✅ MetaService 元数据 | ✅ MetaService 元数据 |
@@ -212,7 +212,7 @@ FE 存储 Doris 的元数据（库表定义、用户权限、分区路由等）�
 - 计算节点（CN）注册和健康状态
 - 数据版本和事务状态
 
-> **注意**：本项目的 `k8s-local` 和 `k8s-gke` 默认配置均为**存算一体模式**（FE + BE 直接挂载本地存储），不启用 MetaService。MetaService 是 Doris 4.x 存算分离特性的组成部分。
+> **注意**：本项目的 `k8s-local` 和 `k8s-gke` 默认配置均为**存算分离模式**（FE + BECN，数据存在 MinIO/GCS），启用 MetaService。存算一体模式（FE + BE 本地存储）不再作为默认配置。
 
 #### Doris Operator — Kubernetes 控制器
 
@@ -222,9 +222,9 @@ FE 存储 Doris 的元数据（库表定义、用户权限、分区路由等）�
 | **工作原理** | 调谐循环 (Reconcile Loop)：读取 DorisCluster 期望状态 → 对比实际状态 → 执行操作使两者一致 |
 | **管理内容** | FE/BE/CN 的 Deployment/StatefulSet、Service、PodDisruptionBudget、扩容升级 |
 | **与 FE/BE 的区别** | Operator 是"管理员"，FE/BE 是"执行者" |
-| **版本** | 本项目使用 v25.8.0 |
+| **版本** | 本项目使用 v1.4.0 |
 | **部署位置** | `doris-operator-system` 命名空间 |
-| **CRD 版本** | `doris.selectdb.com/v1`（v2.x 版本） |
+| **CRD 版本** | `doris.apache.com/v1`（Apache Doris Operator v1.x） |
 
 **Operator 的工作流程**：
 ```
@@ -304,16 +304,16 @@ BE Pod 启动，向 FE 注册
 | **成本** | 比 SSD 低 10x，适合存储大量历史数据 |
 | **配置位置** | `k8s-gke/configmap-be.yaml` 中的 S3 相关配置 |
 
-#### MinIO — S3 兼容对象存储（配置中预留）
+#### MinIO — S3 兼容对象存储（k8s-local 实际部署）
 
 | 项目 | 说明 |
 |------|------|
-| **是什么** | 开源 S3 兼容对象存储，可本地部署 |
-| **本项目状态** | 配置文件中预留了 MinIO 访问配置，但**当前本地模式未实际部署** |
-| **用途（理论上）** | 替代 GCS 作为 BE 冷数据存储 |
-| **生产建议** | 如需本地 S3 兼容存储，建议独立部署 MinIO 集群而非放在 K8s 中 |
+| **是什么** | 开源 S3 兼容对象存储，k8s-local 本地模式的数据存储后端 |
+| **本项目状态** | `k8s-local` 通过 `minio-statefulset.yaml` 实际部署 MinIO StatefulSet |
+| **与 GKE 的关系** | GKE 版本使用 GCS，本地版本使用 MinIO；两者接口完全一致 |
+| **访问地址** | `http://minio.foundationdb.svc.cluster.local:9000` |
 
-> **本项目存储架构说明**：本地模式（k8s-local）使用 emptyDir，不依赖 MinIO。MinIO 相关配置仅作为参考保留在配置文件中。
+> **部署方式**：MinIO 以 StatefulSet 单节点模式部署在 `foundationdb` 命名空间，通过 `doris-disaggregated-cluster.yaml` 中的 S3 配置供 BECN 使用。
 
 ---
 
@@ -686,9 +686,9 @@ BDB JE 使用 Paxos 协议进行 Leader 选举和数据同步。奇数个节点�
 
 | 组件 | 本项目版本 | 说明 |
 |------|-----------|------|
-| Apache Doris | 3.1.4 (本地) / 2.1.5 (GKE) | 社区最新稳定版 |
-| Doris Operator | 25.8.0 | Kubernetes Operator |
-| Kubernetes | 1.28+ (GKE) / 1.34 (Docker Desktop) | |
+| Apache Doris | 4.0.4 (统一版本) | 社区最新稳定版 |
+| Doris Operator | 1.4.0 | Kubernetes Operator |
+| Kubernetes | 1.28+ (GKE) / 1.28+ (Docker Desktop) | |
 | FoundationDB | 7.1.37 | 可选，仅高级特性 |
 | Prometheus | v2.45+ | GKE 托管或独立部署 |
 | Grafana | 10.0+ | 可选 |

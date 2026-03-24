@@ -172,7 +172,7 @@ open http://$FE_IP:8030
 # 在 doriscluster.yaml 中添加
 cnSpec:
   replicas: 3
-  image: apache/doris:be-3.1.4
+  image: apache/doris:4.0.4
   resources:
     requests:
       cpu: "8"
