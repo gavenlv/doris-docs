@@ -113,7 +113,7 @@ spec:
                   type: boolean
                 tlsSecretRef:
                   type: string
-               KvReplicatorImage:
+                KvReplicatorImage:
                   type: string
                 logGroup:
                   type: string
