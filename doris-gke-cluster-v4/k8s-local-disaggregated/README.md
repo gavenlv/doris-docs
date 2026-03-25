@@ -1,8 +1,15 @@
 # Doris 存算分离架构本地 Kubernetes 部署指南
 
+## 版本信息
+
+- **Doris 版本**: 4.0.4
+- **Doris Operator 版本**: 1.4.0
+- **FoundationDB 版本**: 7.1.37
+- **FDB Operator 版本**: 1.12.0
+
 ## 概述
 
-本目录包含在本地 Kubernetes 环境中部署 **Doris 存算分离架构** 集群的配置和脚本。
+本目录包含在本地 Kubernetes 环境中部署 **Doris 4.0.4 存算分离架构** 集群的配置和脚本。
 
 ### 部署架构
 
@@ -12,6 +19,7 @@
 │                                                                      │
 │  ┌──────────────────────────────────────────────────────────────┐   │
 │  │                    DorisDisaggregatedCluster                  │   │
+│  │                           v4.0.4                              │   │
 │  │                                                              │   │
 │  │  ┌──────────┐   ┌──────────┐   ┌──────────┐                │   │
 │  │  │    FE    │   │    FE    │   │    FE    │  (3 副本)      │   │
@@ -48,15 +56,15 @@
 
 ### 组件说明
 
-| 组件 | 副本数 | 说明 |
-|------|--------|------|
-| FE (Frontend) | 3 | SQL 解析、查询规划、查询协调、元数据管理 |
-| MetaService | 3 | 存储层元数据 (Tablet 位置、副本信息)，使用 FDB 存储 |
-| BECN | 3+ | Backend Compute Node，数据计算，不存储数据 |
-| MinIO | 1 | S3 兼容对象存储，数据持久化 |
-| FoundationDB | 3 | MetaService 的元数据存储 |
-| Doris Operator | 1 | 管理 DorisDisaggregatedCluster |
-| FDB Operator | 1 | 管理 FoundationDB 集群 |
+| 组件 | 副本数 | 镜像 | 说明 |
+|------|--------|------|------|
+| FE (Frontend) | 3 | `apache/doris:4.0.4-secure` | SQL 解析、查询规划、查询协调、元数据管理 |
+| MetaService | 3 | `apache/doris:4.0.4-secure` | 存储层元数据 (Tablet 位置、副本信息)，使用 FDB 存储 |
+| BECN | 3+ | `apache/doris:4.0.4-secure` | Backend Compute Node，数据计算，不存储数据 |
+| MinIO | 1 | `minio/minio:latest` | S3 兼容对象存储，数据持久化 |
+| FoundationDB | 3 | `foundationdb/foundationdb:7.1.37` | MetaService 的元数据存储 |
+| Doris Operator | 1 | `apache/doris:operator-1.4.0` | 管理 DorisDisaggregatedCluster |
+| FDB Operator | 1 | `fdb-kubernetes-operator:1.12.0` | 管理 FoundationDB 集群 |
 
 ### 自动扩容 (HPA)
 
@@ -81,8 +89,7 @@
 # 拉取命令 (需要 Docker Hub 访问)
 docker pull fdb-kubernetes-operator:1.12.0
 docker pull foundationdb/foundationdb:7.1.37
-docker pull apache/doris:fe-3.1.4
-docker pull apache/doris:be-3.1.4
+docker pull apache/doris:4.0.4-secure
 docker pull apache/doris:operator-1.4.0
 docker pull minio/minio:latest
 ```
@@ -91,7 +98,7 @@ docker pull minio/minio:latest
 |------|------|------|
 | `fdb-kubernetes-operator:1.12.0` | 1.12.0 | FDB Operator |
 | `foundationdb/foundationdb:7.1.37` | 7.1.37 | FDB 数据库 |
-| `apache/doris:fe-3.1.4` | 3.1.4 | FE/BE/MetaService |
+| `apache/doris:4.0.4-secure` | 4.0.4 | FE/BE/MetaService (存算分离) |
 | `apache/doris:operator-1.4.0` | 1.4.0 | Doris Operator |
 | `minio/minio:latest` | latest | S3 兼容存储 |
 
@@ -172,21 +179,21 @@ SHOW PROC '/backends';
 
 ## 环境变量
 
-部署时可通过环境变量覆盖默认镜像：
+部署时可通过环境变量覆盖默认配置：
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
+| `DORIS_VERSION` | `4.0.4` | Doris 版本 |
 | `FDB_OPERATOR_IMAGE` | `fdb-kubernetes-operator:1.12.0` | FDB Operator 镜像 |
 | `FDB_IMAGE` | `foundationdb/foundationdb:7.1.37` | FDB 镜像 |
-| `DORIS_FE_IMAGE` | `apache/doris:fe-3.1.4` | FE 镜像 |
-| `DORIS_BE_IMAGE` | `apache/doris:be-3.1.4` | BE 镜像 |
+| `DORIS_IMAGE` | `apache/doris:4.0.4-secure` | Doris 镜像 |
 | `OPERATOR_IMAGE` | `apache/doris:operator-1.4.0` | Doris Operator 镜像 |
 | `MINIO_IMAGE` | `minio/minio:latest` | MinIO 镜像 |
 
 示例：
 
 ```bash
-FDB_IMAGE=localhost:5000/foundationdb:7.1.37 ./deploy.sh
+DORIS_IMAGE=localhost:5000/doris:4.0.4-secure ./deploy.sh
 ```
 
 ## 端口说明
@@ -200,6 +207,15 @@ FDB_IMAGE=localhost:5000/foundationdb:7.1.37 ./deploy.sh
 | MetaService | ClusterIP | 5000 | - |
 | MinIO API | NodePort | 9000 | 30000 |
 | MinIO Console | NodePort | 9001 | 30001 |
+
+## Doris 4.0.4 新特性
+
+Doris 4.0.4 是存算分离架构的成熟版本，包含以下特性：
+
+- **存算分离**: 计算节点无状态，数据存储在对象存储
+- **弹性扩缩容**: 仅扩缩容计算节点，不影响数据
+- **冷热分层**: 自动将冷数据卸载到对象存储
+- **MetaService**: 高性能元数据管理，基于 FoundationDB
 
 ## 故障排查
 
@@ -266,4 +282,4 @@ kubectl top pods -n doris
 
 - [Doris 官方文档](https://doris.apache.org/docs/)
 - [Doris Operator 文档](https://github.com/apache/doris-operator)
-- [FoundationDB 文档](https://foundationdb.com/
+- [FoundationDB 文档](https://foundationdb.com/)

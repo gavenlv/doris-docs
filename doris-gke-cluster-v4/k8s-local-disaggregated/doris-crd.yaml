@@ -3,6 +3,7 @@
 # =============================================================================
 # 来源: https://github.com/apache/doris-operator
 # 版本: doris.apache.com/v1
+# Doris 版本: 4.0.4
 #
 # 注意: 这是简化版 CRD，仅包含必要的 schema 定义
 # 生产环境建议使用完整 CRD

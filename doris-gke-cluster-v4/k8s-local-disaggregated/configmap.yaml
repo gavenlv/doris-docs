@@ -2,6 +2,7 @@
 # ConfigMap 配置
 # =============================================================================
 # 作用: 存储 Doris 组件的非敏感配置
+# 版本: Doris 4.0.4
 #
 # 内容:
 #   - FE 配置 (fe.conf)
@@ -20,9 +21,13 @@ metadata:
     app.kubernetes.io/name: doris
     app.kubernetes.io/component: fe
     app.kubernetes.io/part-of: doris-disagg
+    doris-version: "4.0.4"
 data:
   fe.conf: |
-    # FE 配置
+    # ===========================================================
+    # FE 配置 - Doris 4.0.4
+    # ===========================================================
+
     # 端口配置
     http_port = 8030
     rpc_port = 9010
@@ -30,19 +35,28 @@ data:
     edit_log_port = 9010
 
     # JVM 配置
-    JAVA_OPTS = "-Xmx4g -Xms2g -XX:+UseG1GC"
+    JAVA_OPTS = "-Xmx8g -Xms4g -XX:+UseG1GC -XX:+UseG1GC"
 
     # 元数据配置
     metadata_failure_recovery = false
-    catalog = doris
     enable_stale_read = true
 
     # 日志配置
     log_verbose_modules = *
 
     # 连接配置
-    max_connections = 2048
+    max_connections = 4096
     wait_timeout = 86400
+    max_allowed_packet = 1048576
+
+    # 查询配置
+    exec_thread_num = 256
+    scan_thread_num = 32
+    serial_consistant_read_thread_num = 32
+
+    # 元数据同步配置
+    cluster_id = -1
+   fe_start_with_mycnofig = false
 
 ---
 # BE ConfigMap
@@ -55,9 +69,13 @@ metadata:
     app.kubernetes.io/name: doris
     app.kubernetes.io/component: becn
     app.kubernetes.io/part-of: doris-disagg
+    doris-version: "4.0.4"
 data:
   be.conf: |
-    # BE 配置
+    # ===========================================================
+    # BE 配置 - Doris 4.0.4 (存算分离模式)
+    # ===========================================================
+
     # 端口配置
     be_port = 9060
     be_webserver_port = 8040
@@ -66,9 +84,9 @@ data:
     arrow_flight_sql_port = 9070
 
     # JVM 配置
-    JAVA_OPTS = "-Xmx8g -Xms4g -XX:+UseG1GC"
+    JAVA_OPTS = "-Xmx16g -Xms8g -XX:+UseG1GC"
 
-    # 存储配置
+    # 存储配置 (存算分离模式下，BECN 仅使用本地缓存)
     storage_root_path = /opt/doris/storage
     max_tablet_data_size = 536870912
 
@@ -79,6 +97,9 @@ data:
 
     # 日志配置
     sys_log_verbose_modules = *
+
+    # BE 角色 (计算节点)
+    be_role = computation_only
 
 ---
 # MetaService ConfigMap
@@ -91,13 +112,33 @@ metadata:
     app.kubernetes.io/name: doris
     app.kubernetes.io/component: meta-service
     app.kubernetes.io/part-of: doris-disagg
+    doris-version: "4.0.4"
 data:
   doris_cloud.conf: |
-    # MetaService 配置
+    # ===========================================================
+    # MetaService 配置 - Doris 4.0.4
+    # ===========================================================
+
+    # MetaService 监听端口
     brpc_listen_port = 5000
+
+    # BRPC 工作线程数 (-1 = CPU 核心数)
     brpc_num_threads = -1
+
+    # 日志级别
     log_level = info
+
+    # 日志目录
     log_dir = /var/log/doris
+
+    # 最大连接数
     max_concurrency = 128
+
+    # 事务超时时间 (秒)
     transaction_timeout = 300
+
+    # Tablet 元数据缓存大小
     tablet_meta_cache_size = 2147483648  # 2GB
+
+    # FDB 配置
+    fdb_cluster_file = /etc/fdb/fdb.cluster

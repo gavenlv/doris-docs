@@ -3,6 +3,7 @@
 # =============================================================================
 # 作用: 管理 DorisDisaggregatedCluster 的生命周期
 # 版本: apache/doris:operator-1.4.0
+# Doris 版本: 4.0.4
 #
 # 前置条件:
 #   - Doris Operator 镜像已加载: apache/doris:operator-1.4.0

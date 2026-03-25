@@ -5,6 +5,8 @@
 # 作用: 一键部署本地 Doris 集群 (存算分离模式)
 # 适用: Docker Desktop Kubernetes、Minikube
 #
+# 版本: Doris 4.0.4
+#
 # 部署模式: 存算分离 (Storage-Compute Separation)
 #   - FE: SQL 查询协调
 #   - BECN: 计算节点 (不存储数据)
@@ -22,8 +24,7 @@
 #   - 本地镜像已加载:
 #     - fdb-kubernetes-operator:1.12.0
 #     - foundationdb/foundationdb:7.1.37
-#     - apache/doris:fe-3.1.4
-#     - apache/doris:be-3.1.4
+#     - apache/doris:4.0.4-secure
 #     - apache/doris:operator-1.4.0
 #     - minio/minio:latest
 #
@@ -52,11 +53,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # 配置
 # =============================================================================
 
+# Doris 版本
+DORIS_VERSION="${DORIS_VERSION:-4.0.4}"
+
 # 镜像配置
 FDB_OPERATOR_IMAGE="${FDB_OPERATOR_IMAGE:-fdb-kubernetes-operator:1.12.0}"
 FDB_IMAGE="${FDB_IMAGE:-foundationdb/foundationdb:7.1.37}"
-DORIS_FE_IMAGE="${DORIS_FE_IMAGE:-apache/doris:fe-3.1.4}"
-DORIS_BE_IMAGE="${DORIS_BE_IMAGE:-apache/doris:be-3.1.4}"
+DORIS_IMAGE="${DORIS_IMAGE:-apache/doris:4.0.4-secure}"
 OPERATOR_IMAGE="${OPERATOR_IMAGE:-apache/doris:operator-1.4.0}"
 MINIO_IMAGE="${MINIO_IMAGE:-minio/minio:latest}"
 
@@ -100,6 +103,9 @@ check_environment() {
     local cpu=$(kubectl get nodes -o jsonpath='{.items[0].status.capacity.cpu}' 2>/dev/null || echo "unknown")
     local memory=$(kubectl get nodes -o jsonpath='{.items[0].status.capacity.memory}' 2>/dev/null || echo "unknown")
     log_info "集群 CPU: ${cpu}, Memory: ${memory}"
+
+    log_info "Doris 版本: ${DORIS_VERSION}"
+    log_info "Doris 镜像: ${DORIS_IMAGE}"
 
     # 检查 metrics-server
     if ! kubectl get pods -n kube-system -l k8s-app=metrics-server 2>/dev/null | grep -q Running; then
@@ -323,7 +329,7 @@ show_access_info() {
 
     echo ""
     log_info "=========================================="
-    log_info "   Doris 存算分离集群部署完成！"
+    log_info "   Doris ${DORIS_VERSION} 存算分离集群部署完成！"
     log_info "=========================================="
     echo ""
     log_info "访问信息:"
@@ -356,7 +362,7 @@ show_access_info() {
 main() {
     echo ""
     log_info "=========================================="
-    log_info "  Doris 存算分离架构 部署脚本"
+    log_info "  Doris ${DORIS_VERSION} 存算分离架构 部署脚本"
     log_info "  (FE + BECN + MetaService + MinIO + FDB)"
     log_info "=========================================="
     echo ""

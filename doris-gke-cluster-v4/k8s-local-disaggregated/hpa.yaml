@@ -23,6 +23,7 @@ metadata:
     app.kubernetes.io/name: doris
     app.kubernetes.io/component: fe
     app.kubernetes.io/part-of: doris-disagg
+    doris-version: "4.0.4"
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
@@ -74,6 +75,7 @@ metadata:
     app.kubernetes.io/name: doris
     app.kubernetes.io/component: becn
     app.kubernetes.io/part-of: doris-disagg
+    doris-version: "4.0.4"
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
@@ -125,6 +127,7 @@ metadata:
     app.kubernetes.io/name: doris
     app.kubernetes.io/component: meta-service
     app.kubernetes.io/part-of: doris-disagg
+    doris-version: "4.0.4"
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
