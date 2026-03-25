@@ -1,0 +1,116 @@
+# Doris 传统集群部署 (FE + BE) - 使用本地镜像
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: doris
+---
+# FE Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: doris-fe
+  namespace: doris
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: doris
+      component: fe
+  template:
+    metadata:
+      labels:
+        app: doris
+        component: fe
+    spec:
+      containers:
+        - name: fe
+          image: apache/doris:fe-3.1.4
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 9030
+              name: fe-query
+            - containerPort: 8030
+              name: fe-http
+            - containerPort: 9010
+              name: fe-edit-log
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2Gi
+            limits:
+              cpu: 2
+              memory: 4Gi
+---
+# FE Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: doris-fe-service
+  namespace: doris
+spec:
+  selector:
+    app: doris
+    component: fe
+  ports:
+    - name: fe-query
+      port: 9030
+      targetPort: 9030
+    - name: fe-http
+      port: 8030
+      targetPort: 8030
+  type: NodePort
+---
+# BE Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: doris-be
+  namespace: doris
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: doris
+      component: be
+  template:
+    metadata:
+      labels:
+        app: doris
+        component: be
+    spec:
+      containers:
+        - name: be
+          image: apache/doris:be-3.1.4
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 9060
+              name: be-port
+            - containerPort: 8040
+              name: be-webserver
+            - containerPort: 9050
+              name: be-heartbeat
+            - containerPort: 8060
+              name: be-brpc
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2Gi
+            limits:
+              cpu: 2
+              memory: 4Gi
+---
+# BE Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: doris-be-service
+  namespace: doris
+spec:
+  selector:
+    app: doris
+    component: be
+  ports:
+    - name: be-port
+      port: 9060
+      targetPort: 9060
+  type: ClusterIP

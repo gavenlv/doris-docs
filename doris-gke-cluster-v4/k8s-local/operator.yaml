@@ -1,670 +1,151 @@
-# =============================================================================
-# Doris Operator 离线部署配置 (本地 Docker Desktop Kubernetes)
-# =============================================================================
-#
-# 用途说明：
-#   在没有外部网络访问的环境中部署 Doris Operator
-#
-# 什么是 Doris Operator？
-#   - Kubernetes 原生的 Doris 集群管理方式
-#   - 通过 CustomResourceDefinition (CRD) 扩展 Kubernetes
-#   - 自动管理 Doris 集群的完整生命周期
-#
-# 为什么需要 Operator？
-#   1. 声明式管理
-#      - 声明集群期望状态
-#      - Operator 自动调整实际状态
-#
-#   2. 自动化运维
-#      - 自动故障恢复
-#      - 自动扩缩容
-#      - 自动升级/回滚
-#
-#   3. 与 Kubernetes 深度集成
-#      - 使用 native K8s 资源
-#      - 支持 RBAC、Quota、NetworkPolicy 等
-#
-# 架构说明：
-#   ┌─────────────────────────────────────────────────────────────────────┐
-#   │                  Kubernetes API Server                                │
-#   │   ┌─────────────────────────────────────────────────────────────┐   │
-#   │   │              DorisCluster CRD                               │   │
-#   │   │   (声明式定义 Doris 集群)                                  │   │
-#   │   └─────────────────────────────────────────────────────────────┘   │
-#   └─────────────────────────────────────────────────────────────────────┘
-#                               │
-#                               ▼
-#   ┌─────────────────────────────────────────────────────────────────────┐
-#   │                    Doris Operator                                     │
-#   │   ┌─────────────────────────────────────────────────────────────┐   │
-#   │   │              Controller Loop                                 │   │
-#   │   │   1. 监听 DorisCluster 资源变化                             │   │
-#   │   │   2. 创建/更新相关 K8s 资源                                 │   │
-#   │   │   3. 协调集群状态                                           │   │
-#   │   └─────────────────────────────────────────────────────────────┘   │
-#   └─────────────────────────────────────────────────────────────────────┘
-#                               │
-#           ┌───────────────────┼───────────────────┐
-#           ▼                   ▼                   ▼
-#   ┌───────────────┐   ┌───────────────┐   ┌───────────────┐
-#   │   FE StatefulSet  │   │   BE StatefulSet  │   │   Services       │
-#   └───────────────┘   └───────────────┘   └───────────────┘
-#
-# 版本信息：
-#   - Operator 版本：1.4.0
-#   - 支持的 Doris 版本：4.0.x
-#   - API 版本：doris.apache.com/v1
-#
-# 离线部署说明：
-#   - 使用本地镜像（apache/doris:operator-1.4.0）
-#   - 避免从远程仓库拉取镜像
-#   - 需要预先加载镜像到 Docker
-#
-# =============================================================================
-
-# -----------------------------------------------------------------------------
-# 1. Doris Operator Namespace
-# -----------------------------------------------------------------------------
-#
-# 什么是 Namespace？
-#   - Kubernetes 资源隔离机制
-#   - 将集群划分为多个虚拟集群
-#
-# 为什么使用单独的命名空间？
-#   - 与其他应用隔离
-#   - 便于管理权限
-#   - 独立资源配额
-#
-# 约定：
-#   - Operator 通常放在专门的命名空间
-#   - 如 kube-system（系统组件）
-#   - 或自定义的 doris-operator-system
-#
+# Doris Operator 部署
 apiVersion: v1
 kind: Namespace
 metadata:
-  # 命名空间名称
   name: doris-operator-system
-  labels:
-    # 应用名称（推荐标签）
-    app.kubernetes.io/name: doris-operator
-    # 版本标签（便于追踪）
-    app.kubernetes.io/version: "1.4.0"
-
 ---
-
-# =============================================================================
-# CRD 定义 - 必须在 Operator 部署前应用
-# =============================================================================
-
----
-# DorisDisaggregatedCluster CRD - 存算分离集群
-apiVersion: apiextensions.k8s.io/v1
-kind: CustomResourceDefinition
-metadata:
-  name: dorisdisaggregatedclusters.doris.apache.com
-  labels:
-    app.kubernetes.io/name: doris-operator
-    app.kubernetes.io/version: "1.4.0"
-spec:
-  group: doris.apache.com
-  names:
-    kind: DorisDisaggregatedCluster
-    listKind: DorisDisaggregatedClusterList
-    plural: dorisdisaggregatedclusters
-    singular: dorisdisaggregatedcluster
-    shortNames:
-      - disagg
-      - disaggcluster
-  scope: Namespaced
-  versions:
-    - name: v1
-      served: true
-      storage: true
-      schema:
-        openAPIV3Schema:
-          type: object
-          properties:
-            spec:
-              type: object
-            status:
-              type: object
-
----
-# DorisCluster CRD - 传统集群
-apiVersion: apiextensions.k8s.io/v1
-kind: CustomResourceDefinition
-metadata:
-  name: dorisclusters.doris.apache.com
-  labels:
-    app.kubernetes.io/name: doris-operator
-    app.kubernetes.io/version: "1.4.0"
-spec:
-  group: doris.apache.com
-  names:
-    kind: DorisCluster
-    listKind: DorisClusterList
-    plural: dorisclusters
-    singular: doriscluster
-    shortNames:
-      - doris
-  scope: Namespaced
-  versions:
-    - name: v1
-      served: true
-      storage: true
-      schema:
-        openAPIV3Schema:
-          type: object
-          properties:
-            spec:
-              type: object
-            status:
-              type: object
-
----
-
-# -----------------------------------------------------------------------------
-# 2. Operator ServiceAccount
-# -----------------------------------------------------------------------------
-#
-# 什么是 ServiceAccount？
-#   - Pod 访问 Kubernetes API 的身份凭证
-#   - 每个 Pod 运行都需要关联 ServiceAccount
-#
-# 为什么需要 ServiceAccount？
-#   - Operator 需要访问 K8s API 管理资源
-#   - 通过 RBAC 控制 Operator 权限
-#
-# 安全原则：
-#   - 最小权限原则
-#   - 只授予必要的权限
-#   - 后续 ClusterRole 定义具体权限
-#
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: doris-operator
   namespace: doris-operator-system
-  labels:
-    app.kubernetes.io/name: doris-operator
-    app.kubernetes.io/version: "1.4.0"
-
 ---
-
-# -----------------------------------------------------------------------------
-# 3. ClusterRole - 集群级别权限
-# -----------------------------------------------------------------------------
-#
-# 什么是 ClusterRole？
-#   - 集群级别的角色定义
-#   - 权限可以作用于整个集群
-#   - 不受命名空间限制
-#
-# 为什么需要 ClusterRole？
-#   - Operator 需要管理多个命名空间的资源
-#   - 需要访问 cluster-scoped 资源（如 Node）
-#   - CRD 本身是集群级别的资源
-#
-# RBAC 核心概念：
-#   - Role/ClusterRole：定义权限
-#   - RoleBinding/ClusterRoleBinding：绑定权限到主体
-#
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: doris-operator
-  labels:
-    app.kubernetes.io/name: doris-operator
-    app.kubernetes.io/version: "1.4.0"
-
 rules:
-  # =====================================================================
-  # APIExtensions - CRD 访问权限
-  # =====================================================================
-  # 为什么需要 CRD 权限？
-  #   - Operator 需要监听 CRD 资源变化
-  #   - 需要知道 CRD 定义的结构
-  - apiGroups: ["apiextensions.k8s.io"]
-    resources: ["customresourcedefinitions"]
-    verbs: ["get", "list", "watch"]
-
-  # =====================================================================
-  # DorisCluster CRD - 核心资源权限
-  # =====================================================================
-  # 为什么需要这些权限？
-  #   - Operator 需要 CRUD DorisCluster 资源
-  #   - 需要更新 status 和 finalizers
-  - apiGroups: ["doris.apache.com"]
-    resources: ["dorisclusters"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["doris.apache.com"]
-    resources: ["dorisclusters/status"]
-    verbs: ["get", "update", "patch"]
-  - apiGroups: ["doris.apache.com"]
-    resources: ["dorisclusters/finalizers"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-
-  # =====================================================================
-  # DorisDisaggregatedCluster CRD - 存算分离资源权限
-  # =====================================================================
-  - apiGroups: ["doris.apache.com"]
-    resources: ["dorisdisaggregatedclusters"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["doris.apache.com"]
-    resources: ["dorisdisaggregatedclusters/status"]
-    verbs: ["get", "update", "patch"]
-  - apiGroups: ["doris.apache.com"]
-    resources: ["dorisdisaggregatedclusters/finalizers"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-
-  # =====================================================================
-  # Apps API - StatefulSets 管理
-  # =====================================================================
-  # 为什么需要 StatefulSets 权限？
-  #   - Doris FE/BE 使用 StatefulSets 管理
-  #   - Operator 需要创建/管理这些资源
-  #   - StatefulSets 是有状态应用的核心
-  - apiGroups: ["apps"]
-    resources: ["statefulsets"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["apps"]
-    resources: ["statefulsets/status"]
-    verbs: ["get", "watch"]
-  - apiGroups: ["apps"]
-    resources: ["statefulsets/finalizers"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["apps"]
-    resources: ["deployments"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["apps"]
-    resources: ["deployments/status"]
-    verbs: ["get", "watch"]
-  - apiGroups: ["apps"]
-    resources: ["replicasets"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["apps"]
-    resources: ["replicasets/status"]
-    verbs: ["get", "watch"]
-
-  # =====================================================================
-  # Core API - 核心资源权限
-  # =====================================================================
-  # 为什么需要这些核心资源权限？
-  #   - Pods：监控和管理 Pod 状态
-  #   - Services：创建 Service 暴露服务
-  #   - ConfigMaps/Secrets：挂载配置
-  #   - PersistentVolumeClaims：持久化存储
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: [""]
-    resources: ["pods/status"]
-    verbs: ["get", "watch", "patch"]
-  - apiGroups: [""]
-    resources: ["pods/exec"]
-    verbs: ["create"]
-  - apiGroups: [""]
-    resources: ["pods/log"]
-    verbs: ["get"]
-  - apiGroups: [""]
-    resources: ["services"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: [""]
-    resources: ["services/status"]
-    verbs: ["get", "watch"]
-  - apiGroups: [""]
-    resources: ["configmaps"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: [""]
-    resources: ["configmaps/status"]
-    verbs: ["get", "watch"]
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: [""]
-    resources: ["persistentvolumeclaims"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: [""]
-    resources: ["persistentvolumeclaims/status"]
-    verbs: ["get", "watch"]
-  - apiGroups: [""]
-    resources: ["namespaces"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["events"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: [""]
-    resources: ["nodes"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["endpoints"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: [""]
-    resources: ["serviceaccounts"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-
-  # =====================================================================
-  # Storage API - 存储类权限
-  # =====================================================================
-  # 为什么需要存储权限？
-  #   - 需要获取可用存储类信息
-  #   - CSI 驱动信息
-  - apiGroups: ["storage.k8s.io"]
-    resources: ["storageclasses"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["storage.k8s.io"]
-    resources: ["csidrivers"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["storage.k8s.io"]
-    resources: ["csinodes"]
-    verbs: ["get", "list", "watch"]
-
-  # =====================================================================
-  # Networking API - 网络资源权限
-  # =====================================================================
-  # 为什么需要网络权限？
-  #   - Ingress：外部访问配置
-  #   - NetworkPolicies：网络隔离
-  - apiGroups: ["networking.k8s.io"]
-    resources: ["ingresses"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["networking.k8s.io"]
-    resources: ["ingresses/status"]
-    verbs: ["get", "watch"]
-  - apiGroups: ["networking.k8s.io"]
-    resources: ["networkpolicies"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-
-  # =====================================================================
-  # Autoscaling API - HPA 权限
-  # =====================================================================
-  # 为什么需要 HPA 权限？
-  #   - Doris 支持基于 HPA 的自动扩缩容
-  #   - Operator 需要管理 HPA 资源
-  - apiGroups: ["autoscaling"]
-    resources: ["horizontalpodautoscalers"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["autoscaling"]
-    resources: ["horizontalpodautoscalers/status"]
-    verbs: ["get", "watch"]
-
-  # =====================================================================
-  # Policy API - Pod 中断预算
-  # =====================================================================
-  # 为什么需要 PDB 权限？
-  #   - 维护集群高可用
-  #   - 控制滚动更新期间可用 Pod 数量
-  - apiGroups: ["policy"]
-    resources: ["poddisruptionbudgets"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["policy"]
-    resources: ["poddisruptionbudgets/status"]
-    verbs: ["get", "watch"]
-
-  # =====================================================================
-  # Batch API - Job/CronJob 权限
-  # =====================================================================
-  # 为什么需要 Batch 权限？
-  #   - 备份恢复可能使用 Job/CronJob
-  #   - 定时任务支持
-  - apiGroups: ["batch"]
-    resources: ["jobs"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  - apiGroups: ["batch"]
-    resources: ["cronjobs"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-
-  # =====================================================================
-  # Coordination API - Leader 选举
-  # =====================================================================
-  # 为什么需要 Lease 权限？
-  #   - Kubernetes 内部 Leader 选举机制
-  #   - Operator 高可用支持
-  - apiGroups: ["coordination.k8s.io"]
-    resources: ["leases"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-
-  # =====================================================================
-  # Discovery API - Endpoint Slices
-  # =====================================================================
-  # 为什么需要 EndpointSlice 权限？
-  #   - Service 端点发现
-  #   - 网络路由优化
-  - apiGroups: ["discovery.k8s.io"]
-    resources: ["endpointslices"]
-    verbs: ["get", "list", "watch"]
-
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - endpoints
+      - events
+      - persistentvolumeclaims
+      - pods
+      - podtemplates
+      - secrets
+      - services
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - daemonsets
+      - deployments
+      - deployments/finalizers
+      - replicasets
+      - statefulsets
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - controllerrevisions
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - doris.apache.com
+    resources:
+      - "*"
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - doris.apache.com
+    resources:
+      - "*/finalizers"
+    verbs:
+      - update
+  - apiGroups:
+      - doris.apache.com
+    resources:
+      - "*/status"
+    verbs:
+      - get
+      - patch
+      - update
 ---
-
-# -----------------------------------------------------------------------------
-# 4. ClusterRoleBinding - 绑定权限到 ServiceAccount
-# -----------------------------------------------------------------------------
-#
-# 什么是 ClusterRoleBinding？
-#   - 将 ClusterRole 绑定到特定主体
-#   - 主体通常是 ServiceAccount
-#
-# 为什么需要？
-#   - 将 ClusterRole 权限授予 ServiceAccount
-#   - ServiceAccount 只能在特定命名空间
-#   - 但权限是集群级别的
-#
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: doris-operator
-  namespace: doris-operator-system
-  labels:
-    app.kubernetes.io/name: doris-operator
-    app.kubernetes.io/version: "1.4.0"
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: doris-operator
 subjects:
-  # 将权限绑定到 doris-operator ServiceAccount
   - kind: ServiceAccount
     name: doris-operator
     namespace: doris-operator-system
-
 ---
-
-# -----------------------------------------------------------------------------
-# 5. Operator Deployment
-# -----------------------------------------------------------------------------
-#
-# 什么是 Deployment？
-#   - 管理 Pod 的副本数
-#   - 支持滚动更新
-#   - 自愈能力
-#
-# 为什么使用 Deployment？
-#   - Operator 通常只需要一个副本
-#   - Deployment 提供自愈和滚动更新
-#   - 高可用场景可扩展到多副本
-#
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: doris-operator
   namespace: doris-operator-system
-  labels:
-    app.kubernetes.io/name: doris-operator
-    app.kubernetes.io/version: "1.4.0"
-    app.kubernetes.io/component: operator
 spec:
-  # 副本数
-  # 为什么只需要 1 个？
-  #   - Operator 是无状态的
-  #   - 使用 Leader 选举保证高可用
-  #   - 多个副本会资源浪费
   replicas: 1
-
-  # 选择器
-  # 为什么需要？
-  #   - Deployment 使用选择器匹配 Pod
-  #   - 必须与 Pod 模板的标签匹配
   selector:
     matchLabels:
       app.kubernetes.io/name: doris-operator
-      app.kubernetes.io/version: "1.4.0"
-
-  # Pod 模板
   template:
     metadata:
       labels:
         app.kubernetes.io/name: doris-operator
-        app.kubernetes.io/version: "1.4.0"
-        app.kubernetes.io/component: operator
     spec:
-      # 关联 ServiceAccount
-      # 为什么需要？
-      #   - Operator 需要以特定身份访问 K8s API
-      #   - 身份由 ServiceAccount 定义
       serviceAccountName: doris-operator
-
       containers:
         - name: operator
-          # 镜像
-          # 为什么使用特定版本？
-          #   - 避免 latest 标签的不确定性
-          #   - 便于回滚和问题排查
-          image: apache/doris:operator-1.4.0
-
-          # 镜像拉取策略
-          # IfNotPresent 原因：
-          #   - 本地开发环境通常使用本地镜像
-          #   - 避免每次都从远程拉取
-          #   - 离线环境必须使用此策略
+          image: apache/doris:operator-latest
           imagePullPolicy: IfNotPresent
-
-          # 启动命令
-          # 为什么需要？
-          #   - 指定容器入口点
-          #   - /dorisoperator 是 Operator 的主程序
-          command:
-            - /dorisoperator
-
-          # 资源限制
-          # 为什么需要限制？
-          #   - 防止 Operator 占用过多资源
-          #   - 影响其他应用
-          #   - 便于容量规划
-          resources:
-            requests:
-              cpu: 100m      # 0.1 核
-              memory: 256Mi   # 256 MB
-            limits:
-              cpu: 500m     # 0.5 核
-              memory: 512Mi   # 512 MB
-
-          # 环境变量
-          # LOG_LEVEL: 日志级别
-          # 1 = Info 级别
-          env:
-            - name: LOG_LEVEL
-              value: "1"
-
-          # 健康检查
-          # 为什么需要？
-          #   - Kubernetes 需要知道 Operator 是否健康
-          #   - 不健康会自动重启
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: 8081
-            initialDelaySeconds: 30
-            periodSeconds: 10
-
-          readinessProbe:
-            httpGet:
-              path: /readyz
-              port: 8081
-            initialDelaySeconds: 5
-            periodSeconds: 10
-
-          # 端口
-          # 为什么需要暴露端口？
-          #   - metrics: Prometheus 抓取指标
-          #   - health: 健康检查
           ports:
-            - name: metrics
-              containerPort: 8080
-            - name: health
-              containerPort: 8081
-
-      # 容忍配置
-      # 为什么需要容忍？
-      #   - 允许 Pod 调度到有污点的节点
-      #   - 灵活性更高
-      tolerations:
-        - operator: Exists
-
----
-
-# -----------------------------------------------------------------------------
-# 6. Operator Service
-# -----------------------------------------------------------------------------
-#
-# 什么是 Service？
-#   - 为 Pod 提供稳定的访问入口
-#   - 支持负载均衡
-#
-# 为什么需要 Service？
-#   - 暴露 Operator 的 metrics 端口
-#   - 便于 Prometheus 抓取指标
-#   - 提供稳定的 Endpoint
-#
-apiVersion: v1
-kind: Service
-metadata:
-  name: doris-operator
-  namespace: doris-operator-system
-  labels:
-    app.kubernetes.io/name: doris-operator
-    app.kubernetes.io/version: "1.4.0"
-spec:
-  # Service 类型
-  # ClusterIP 原因：
-  #   - 仅集群内部访问
-  #   - 不需要外部访问
-  #   - 节省资源
-  type: ClusterIP
-
-  ports:
-    - name: metrics
-      port: 8080
-      targetPort: 8080
-
-  # 选择器
-  # 为什么需要？
-  #   - Service 通过选择器找到目标 Pod
-  #   - 匹配带有特定标签的 Operator Pod
-  selector:
-    app.kubernetes.io/name: doris-operator
-    app.kubernetes.io/version: "1.4.0"
-
-# =============================================================================
-# 部署验证
-# =============================================================================
-#
-# 部署后验证步骤：
-#
-# 1. 检查 Operator Pod 状态
-#    kubectl get pods -n doris-operator-system
-#    # 应该看到 doris-operator-xxx Running 状态
-#
-# 2. 检查 CRD 是否注册
-#    kubectl get crd | grep doris
-#    # 应该看到 dorisclusters.doris.selectdb.com
-#
-# 3. 检查日志
-#    kubectl logs -n doris-operator-system deployment/doris-operator
-#    # 应该看到 "Starting Doris Operator" 日志
-#
-# 4. 检查 RBAC
-#    kubectl auth can-i get pods --as=system:serviceaccount:doris-operator-system:doris-operator
-#    # 应该返回 "yes"
-#
-# =============================================================================
+            - containerPort: 8080
+              name: metrics
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          env:
+            - name: WATCH_NAMESPACE
+              value: ""
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: OPERATOR_NAME
+              value: doris-operator

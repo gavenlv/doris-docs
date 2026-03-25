@@ -1,0 +1,48 @@
+# FDB 单节点测试部署
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: foundationdb
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: fdb-single
+  namespace: foundationdb
+spec:
+  containers:
+    - name: fdb
+      image: foundationdb/foundationdb:7.1.37
+      imagePullPolicy: Never
+      ports:
+        - containerPort: 4500
+          name: tls
+        - containerPort: 4510
+          name: backup
+      args:
+        - --class=storage
+        - --public-address=0.0.0.0:4500
+        - --listen-address=0.0.0.0:4500
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+        limits:
+          cpu: 2
+          memory: 4Gi
+      volumeMounts:
+        - name: fdb-data
+          mountPath: /var/fdb/data
+      readinessProbe:
+        tcpSocket:
+          port: 4500
+        initialDelaySeconds: 10
+        periodSeconds: 5
+      livenessProbe:
+        tcpSocket:
+          port: 4500
+        initialDelaySeconds: 30
+        periodSeconds: 15
+  volumes:
+    - name: fdb-data
+      emptyDir: {}

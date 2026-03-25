@@ -31,18 +31,17 @@ ARG DORIS_VERSION
 
 WORKDIR /tmp/downloads
 
-# Check if SOURCE_TAR is provided for offline build
-# If provided (file exists), copy it; otherwise download from network
-COPY --from=builder /tmp/source.tar.gz /tmp/downloads/apache-doris-${DORIS_VERSION}-bin-x64.tar.gz 2>/dev/null || \
+# Install wget for potential network download
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
-# If SOURCE_TAR is provided as build arg, copy it; otherwise download
-RUN if [ -n "${SOURCE_TAR:-}" ] && [ -f "${SOURCE_TAR}" ]; then \
-        echo "Using local package: ${SOURCE_TAR}"; \
-        cp "${SOURCE_TAR}" "/tmp/downloads/apache-doris-${DORIS_VERSION}-bin-x64.tar.gz"; \
-    else \
+# Copy local Doris package if provided via build context
+# Build context is the project root, so path is: offline-packages/apache-doris-{VERSION}-bin-x64.tar.gz
+COPY offline-packages/apache-doris-${DORIS_VERSION}-bin-x64.tar.gz /tmp/downloads/apache-doris-${DORIS_VERSION}-bin-x64.tar.gz
+
+# Alternative: download from network if local file doesn't exist (not applicable for offline build)
+RUN if [ ! -f "/tmp/downloads/apache-doris-${DORIS_VERSION}-bin-x64.tar.gz" ]; then \
         echo "Downloading Doris ${DORIS_VERSION} from network..."; \
         wget -q --timeout=300 \
             "https://apache-doris-releases.oss-accelerate.aliyuncs.com/apache-doris-${DORIS_VERSION}-bin-x64.tar.gz" \

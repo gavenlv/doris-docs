@@ -81,8 +81,8 @@ spec:
   # -----------------------------------------------------------------------------
   # 存储配置
   # -----------------------------------------------------------------------------
-  # 说明: 使用 host-path 存储 (与 doris-be-storage 相同)
-  storageClass: doris-be-storage
+  # 说明: 使用 host-path 存储 (与 minio-storage 相同)
+  storageClass: minio-storage
 
   # 每个存储进程的 PVC 大小
   # 本地开发: 5Gi
@@ -93,7 +93,7 @@ spec:
     resources:
       requests:
         storage: 5Gi
-    # storageClassName: doris-be-storage  # 如果 PVC spec 不支持直接指定
+    storageClassName: minio-storage
 
   # -----------------------------------------------------------------------------
   # 网络配置 (FQDN 模式)
