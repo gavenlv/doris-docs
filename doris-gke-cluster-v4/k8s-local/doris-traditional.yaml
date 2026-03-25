@@ -26,6 +26,11 @@ spec:
         - name: fe
           image: apache/doris:fe-3.1.4
           imagePullPolicy: Never
+          env:
+            - name: FE_SERVERS
+              value: "fe1:127.0.0.1:9010"
+            - name: FE_ID
+              value: "1"
           ports:
             - containerPort: 9030
               name: fe-query
@@ -82,6 +87,11 @@ spec:
         - name: be
           image: apache/doris:be-3.1.4
           imagePullPolicy: Never
+          env:
+            - name: FE_SERVERS
+              value: "fe1:127.0.0.1:9010"
+            - name: BE_ADDR
+              value: "127.0.0.1:9050"
           ports:
             - containerPort: 9060
               name: be-port

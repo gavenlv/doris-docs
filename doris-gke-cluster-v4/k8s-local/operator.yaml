@@ -128,7 +128,7 @@ spec:
       serviceAccountName: doris-operator
       containers:
         - name: operator
-          image: apache/doris:operator-latest
+          image: apache/doris:operator-1.4.0
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
