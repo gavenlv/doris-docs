@@ -2,23 +2,19 @@
 # FoundationDB Kubernetes Operator 部署配置
 # =============================================================================
 # 作用: 管理 FoundationDB 集群的生命周期
-# 适用: 本地开发环境 (k8s-local)
-# 版本: 7.1.37
+# 版本: fdb-kubernetes-operator 1.12.0 + foundationdb 7.1.37
 #
 # 前置条件:
 #   - Kubernetes 1.26+
-#   - 默认存储类或已配置的 StorageClass
+#   - FDB 镜像已加载到本地 (foundationdb/foundationdb:7.1.37)
+#   - fdb-kubernetes-operator 镜像已加载 (fdb-kubernetes-operator:1.12.0)
 #
 # 部署顺序:
-#   1. kubectl apply -f fdb-operator.yaml
-#   2. kubectl apply -f fdbcluster.yaml
-#   3. 等待 FDB 集群就绪
+#   kubectl apply -f fdb-operator.yaml
 # =============================================================================
 
 ---
-# -----------------------------------------------------------------------------
-# Namespace (可选 - 分离 FDB 到独立命名空间)
-# -----------------------------------------------------------------------------
+# Namespace
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -28,134 +24,7 @@ metadata:
     app.kubernetes.io/managed-by: kubectl
 
 ---
-# -----------------------------------------------------------------------------
-# CRD: FoundationDBCluster
-# -----------------------------------------------------------------------------
-# 说明: 定义 FoundationDB 集群资源
-# 来源: https://github.com/FoundationDB/fdb-kubernetes-operator/config/crd/bases
-
-apiVersion: apiextensions.k8s.io/v1
-kind: CustomResourceDefinition
-metadata:
-  name: foundationdbclusters.apps.foundationdb.org
-  labels:
-    app.kubernetes.io/name: foundationdb
-    app.kubernetes.io/component: fdb-operator
-spec:
-  group: apps.foundationdb.org
-  names:
-    kind: FoundationDBCluster
-    listKind: FoundationDBClusterList
-    plural: foundationdbclusters
-    singular: foundationdbcluster
-    shortNames:
-      - fdb
-      - fdbcluster
-  scope: Namespaced
-  versions:
-    - name: v1beta1
-      served: true
-      storage: true
-      schema:
-        openAPIV3Schema:
-          type: object
-          properties:
-            spec:
-              type: object
-              properties:
-                version:
-                  type: string
-                image:
-                  type: string
-                instanceIDSource:
-                  type: string
-                podBuildMetadata:
-                  type: object
-                mainContainer:
-                  type: object
-                sidecarContainer:
-                  type: object
-                trustedCertificates:
-                  type: object
-                kustomizeConfig:
-                  type: object
-                faultDomain:
-                  type: object
-                dataCenter:
-                  type: string
-                databaseConfiguration:
-                  type: object
-                processCounts:
-                  type: object
-                podLabelConfig:
-                  type: object
-                resources:
-                  type: object
-                nodeSelector:
-                  type: object
-                priorityClassName:
-                  type: string
-                tolerations:
-                  type: array
-                  items:
-                    type: object
-                services:
-                  type: object
-                storageClass:
-                  type: string
-                storageDefinition:
-                  type: object
-                persistentVolumeClaimSpec:
-                  type: object
-                volumeClaimSpec:
-                  type: object
-                enableTLS:
-                  type: boolean
-                tlsSecretRef:
-                  type: string
-                KvReplicatorImage:
-                  type: string
-                logGroup:
-                  type: string
-                logLevel:
-                  type: string
-                noiseLevel:
-                  type: string
-                exportMetrics:
-                  type: boolean
-                metricsPrefix:
-                  type: string
-                sidecarVariables:
-                  type: object
-                initContainers:
-                  type: object
-                containers:
-                  type: object
-                selector:
-                  type: object
-                topology:
-                  type: object
-                routing:
-                  type: object
-                minimumUptimeSecondsBeforeRestart:
-                  type: integer
-                killProcesses:
-                  type: boolean
-                skip:
-                  type: boolean
-                autoResolve:
-                  type: boolean
-                removeProcesses:
-                  type: array
-                  items:
-                    type: string
-              status:
-                type: object
-
----
-# -----------------------------------------------------------------------------
 # ServiceAccount: FDB Operator
-# -----------------------------------------------------------------------------
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -166,9 +35,7 @@ metadata:
     app.kubernetes.io/component: operator
 
 ---
-# -----------------------------------------------------------------------------
 # ClusterRole: FDB Operator 权限
-# -----------------------------------------------------------------------------
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -177,6 +44,7 @@ metadata:
     app.kubernetes.io/name: foundationdb
     app.kubernetes.io/component: operator
 rules:
+  # 管理 Deployments
   - apiGroups:
       - apps
     resources:
@@ -187,6 +55,7 @@ rules:
       - watch
       - update
       - patch
+  # 管理 StatefulSets
   - apiGroups:
       - apps
     resources:
@@ -199,6 +68,7 @@ rules:
       - patch
       - create
       - delete
+  # 管理 ConfigMaps, Pods, Services 等
   - apiGroups:
       - ""
     resources:
@@ -217,6 +87,7 @@ rules:
       - patch
       - create
       - delete
+  # 管理 Events
   - apiGroups:
       - ""
     resources:
@@ -227,6 +98,7 @@ rules:
       - watch
       - create
       - patch
+  # 管理 FoundationDB CRDs
   - apiGroups:
       - apps.foundationdb.org
     resources:
@@ -254,6 +126,7 @@ rules:
       - get
       - update
       - patch
+  # 管理 Leases (用于领导者选举)
   - apiGroups:
       - coordination.k8s.io
     resources:
@@ -266,6 +139,7 @@ rules:
       - update
       - patch
       - delete
+  # 查看 CRDs
   - apiGroups:
       - apiextensions.k8s.io
     resources:
@@ -274,6 +148,7 @@ rules:
       - get
       - list
       - watch
+  # 管理 PodDisruptionBudgets
   - apiGroups:
       - policy
     resources:
@@ -288,9 +163,7 @@ rules:
       - delete
 
 ---
-# -----------------------------------------------------------------------------
-# ClusterRoleBinding: 绑定 Operator SA 到 ClusterRole
-# -----------------------------------------------------------------------------
+# ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -308,9 +181,7 @@ subjects:
     namespace: foundationdb
 
 ---
-# -----------------------------------------------------------------------------
 # Deployment: FDB Kubernetes Operator
-# -----------------------------------------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -334,27 +205,34 @@ spec:
       serviceAccountName: foundationdb-kubernetes-operator
       containers:
         - name: operator
-          image: foundationdb/foundationdb:7.1.37
+          # 注意: 需要本地镜像 fdb-kubernetes-operator:1.12.0
+          image: fdb-kubernetes-operator:1.12.0
           imagePullPolicy: Never
           ports:
             - name: metrics
               containerPort: 8080
               protocol: TCP
           env:
+            # FDB 集群使用的镜像
             - name: FDB_KUBERNETES_OPERATOR_IMAGE
               value: foundationdb/foundationdb:7.1.37
+            # 初始化容器使用的镜像
             - name: FDB_KUBERNETES_INIT_IMAGE
               value: foundationdb/foundationdb:7.1.37
+            # 日志配置
             - name: FDB_POD_LOG_GROUP
               value: foundationdb
             - name: LOG_LEVEL
               value: INFO
             - name: FDB_POD_LOG_LEVEL
               value: INFO
+            # 禁用 Pod 级别日志
             - name: FDB_DISABLE_POD_LEVEL_LOGGING
               value: "false"
+            # 使用统一镜像模式
             - name: FDB_IMAGE_TYPE
               value: unified
+            # 本地镜像不需要拉取
             - name: FDB_IMAGE_PULL_POLICY
               value: Never
           resources:

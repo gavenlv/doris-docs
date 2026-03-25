@@ -1,261 +1,158 @@
-# Doris Local Kubernetes 配置 (Docker Desktop)
+# Doris 本地 Kubernetes 部署指南
 
-本目录包含在本地 Docker Desktop Kubernetes 环境中部署 Doris 存算分离集群的配置。
+## 概述
 
-## 架构
+本目录包含在本地 Kubernetes 环境中部署 Apache Doris 集群的配置和脚本。
+
+### 部署架构
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    Docker Desktop K8s                                │
-│                                                                      │
-│  ┌───────────────────────────────────────────────────────────────┐   │
-│  │                 doris-operator-system                           │   │
-│  │                    (Doris Operator 1.4.0)                     │   │
-│  └───────────────────────────────────────────────────────────────┘   │
-│                                                                      │
-│  ┌───────────────────────────────────────────────────────────────┐   │
-│  │                     foundationdb                                 │   │
-│  │  ┌─────────────────┐    ┌─────────────────┐                  │   │
-│  │  │  fdb-cluster-0  │    │  minio-0        │                  │   │
-│  │  │  (FDB 7.1.37)  │    │  (MinIO)       │                  │   │
-│  │  └─────────────────┘    └─────────────────┘                  │   │
-│  │        MetaDB                    S3 Storage                    │   │
-│  └───────────────────────────────────────────────────────────────┘   │
-│                                                                      │
-│  ┌───────────────────────────────────────────────────────────────┐   │
-│  │                        doris                                    │   │
-│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────┐ │   │
-│  │  │  doris-disagg-  │  │  doris-disagg-  │  │  doris-     │ │   │
-│  │  │  cluster-fe-*   │  │  cluster-becn-* │  │  disagg-    │ │   │
-│  │  │    (FE x 3)     │◄─┤    (BECN x 3)  │  │  cluster-   │ │   │
-│  │  │                 │  │                 │  │  meta-      │ │   │
-│  │  └─────────────────┘  └─────────────────┘  │  service-*  │ │   │
-│  │                                           └─────────────┘ │   │
-│  └───────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                     Local Kubernetes                          │
+│                                                             │
+│  ┌─────────────────┐         ┌─────────────────┐          │
+│  │   FoundationDB   │         │      Doris      │          │
+│  │   (单节点测试)    │         │                 │          │
+│  │                 │         │  ┌───────────┐  │          │
+│  │  fdb-single     │         │  │    FE     │  │          │
+│  │  Port: 4500     │         │  │  (1副本)  │  │          │
+│  │                 │───────────│  Port: 9030 │  │          │
+│  │                 │         │  └─────┬─────┘  │          │
+│  │                 │         │        │        │          │
+│  │                 │         │  ┌─────▼─────┐  │          │
+│  │                 │         │  │    BE     │  │          │
+│  │                 │         │  │  (1副本)  │  │          │
+│  │                 │         │  │  Port:9060│  │          │
+│  │                 │         │  └───────────┘  │          │
+│  └─────────────────┘         └─────────────────┘          │
+│                                                             │
+│  Services:                                                  │
+│    - doris-fe-service (NodePort: 32036->9030, 31993->8030)  │
+│    - doris-be-service (ClusterIP: 9060)                     │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## 组件说明
+## 部署模式
 
-### 存算分离架构
+本方案采用**简化部署**，不需要 Doris Operator 或 FDB Operator：
 
-| 组件 | 说明 | 副本数 | 资源 |
-|------|------|--------|------|
-| FE | Frontend, SQL 解析/查询协调 | 3 | 1-2 CPU, 4-8Gi |
-| BECN | Backend Compute Node, 仅计算 | 3 | 2-4 CPU, 8-16Gi |
-| MetaService | 存算分离元数据服务 | 3 | 1 CPU, 2-4Gi |
-| FoundationDB | MetaService 的底层存储 | 1 | 0.5-1 CPU, 1-2Gi |
-| MinIO | S3 兼容对象存储 | 1 | 0.25-1 CPU, 0.5-1Gi |
+| 组件 | 部署方式 | 说明 |
+|------|----------|------|
+| FoundationDB | Pod (fdb-single) | 单节点测试用途 |
+| Doris FE | Deployment | 传统 Deployment 方式 |
+| Doris BE | Deployment | 传统 Deployment 方式 |
+
+## 前置条件
+
+- Docker Desktop 已启用 Kubernetes
+- kubectl 已配置并连接到集群
+- 资源需求: 4核CPU + 8GB内存
+- 本地镜像已加载:
+  - `apache/doris:fe-3.1.4`
+  - `apache/doris:be-3.1.4`
+  - `foundationdb/foundationdb:7.1.37`
 
 ## 快速开始
-
-### 前提条件
-
-- Docker Desktop with Kubernetes 已启用
-- kubectl 已安装并配置
-- 资源: 建议 8+ 核 CPU, 16+ GiB 内存
-- Docker 镜像已构建 (参考 build-tools/)
 
 ### 部署
 
 ```bash
 cd k8s-local
-
-# 方式 1: 使用一键部署脚本
 ./deploy.sh
-
-# 方式 2: 手动部署
-# 1. 部署 Doris Operator (包含 CRD)
-kubectl apply -f operator.yaml
-
-# 2. 等待 Operator 就绪
-kubectl wait --for=condition=Ready pods -n doris-operator-system -l app.kubernetes.io/name=doris-operator --timeout=180s
-
-# 3. 部署 FoundationDB Operator
-kubectl apply -f fdb-operator.yaml
-
-# 4. 部署 FoundationDB 集群
-kubectl apply -f fdbcluster.yaml
-
-# 5. 部署 MinIO
-kubectl apply -f minio-statefulset.yaml
-
-# 6. 部署 Doris 存算分离集群
-kubectl apply -f 00-namespace.yaml
-kubectl apply -f secret.yaml
-kubectl apply -f configmap.yaml
-sed -e 's|\${NEXUS_REGISTRY}|localhost:5000/doris|g' doris-disaggregated-cluster.yaml | kubectl apply -f -
 ```
 
-### 验证部署
+### 验证
 
 ```bash
-# 查看 Pod 状态
+# 检查 Pod 状态
 kubectl get pods -n doris
 kubectl get pods -n foundationdb
 
-# 查看 Services
+# 检查 Services
 kubectl get svc -n doris
-kubectl get svc -n foundationdb
-
-# 获取节点 IP
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
-echo "Node IP: $NODE_IP"
 ```
 
-### 访问集群
+### 连接
 
 ```bash
-# FE MySQL 连接 (NodePort)
-mysql -h <节点IP> -P 30632 -u root
+# 获取节点 IP
+NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
 
-# MinIO Console
-# http://<节点IP>:30090
-# 账号: minioadmin / minioadmin
-```
+# 连接 FE
+mysql -h $NODE_IP -P 32036 -u root
 
-### 验证集群状态
-
-```sql
--- 查看 FE 状态
+# 验证集群
 SHOW FRONTENDS;
-
--- 查看 BE 状态
 SHOW BACKENDS;
-
--- 查看详细状态
-SHOW PROC '/frontends';
-SHOW PROC '/backends';
 ```
 
 ### 卸载
 
 ```bash
-cd k8s-local
-
-# 方式 1: 使用脚本 (会提示确认)
 ./undeploy.sh
-
-# 方式 2: 手动卸载
-kubectl delete -f doris-disaggregated-cluster.yaml
-kubectl delete -f minio-statefulset.yaml
-kubectl delete -f fdbcluster.yaml
-kubectl delete -f fdb-operator.yaml
-kubectl delete -f operator.yaml
-kubectl delete namespace doris foundationdb
-kubectl delete -f 00-namespace.yaml
 ```
 
-## 配置文件说明
+## 文件说明
 
 | 文件 | 说明 |
 |------|------|
-| `00-namespace.yaml` | 命名空间、StorageClass、RBAC 定义 |
-| `operator.yaml` | Doris Operator 部署配置 (含 CRD) |
-| `fdb-operator.yaml` | FoundationDB Operator 配置 |
-| `fdbcluster.yaml` | FoundationDB 集群定义 |
-| `minio-statefulset.yaml` | MinIO StatefulSet + Service |
-| `doris-disaggregated-cluster.yaml` | DorisDisaggregatedCluster CRD |
-| `configmap.yaml` | FE/BE 配置文件 |
-| `secret.yaml` | MinIO 凭证 Secret |
-| `hpa.yaml` | HorizontalPodAutoscaler 配置 |
-| `deploy.sh` | 一键部署脚本 |
+| `deploy.sh` | 部署脚本 |
 | `undeploy.sh` | 卸载脚本 |
+| `doris-traditional.yaml` | Doris FE + BE 部署配置 |
+| `fdb-single.yaml` | FDB 单节点部署配置 |
+| `fdb-crd.yaml` | FDB CRD 定义 |
+| `00-namespace.yaml` | Namespace 定义 |
 
-## HPA 自动扩缩容
+## 环境变量
 
-### FE HPA
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DORIS_FE_IMAGE` | `apache/doris:fe-3.1.4` | FE 镜像 |
+| `DORIS_BE_IMAGE` | `apache/doris:be-3.1.4` | BE 镜像 |
+| `FDB_IMAGE` | `foundationdb/foundationdb:7.1.37` | FDB 镜像 |
 
-```yaml
-minReplicas: 3
-maxReplicas: 10
-metrics:
-  - cpu: 70%
-  - memory: 80%
-```
+## 端口说明
 
-### BECN HPA
+| 服务 | 类型 | 内部端口 | NodePort |
+|------|------|----------|----------|
+| FE MySQL | NodePort | 9030 | 32036 |
+| FE HTTP | NodePort | 8030 | 31993 |
+| BE | ClusterIP | 9060 | - |
+| FDB | ClusterIP | 4500 | - |
 
-```yaml
-minReplicas: 3
-maxReplicas: 20
-metrics:
-  - cpu: 70%
-  - memory: 80%
-```
+## 故障排查
 
-### 查看 HPA 状态
-
-```bash
-kubectl get hpa -n doris
-kubectl describe hpa doris-fe-hpa -n doris
-```
-
-## 端口映射
-
-| 服务 | 内部端口 | NodePort | 说明 |
-|------|----------|----------|------|
-| FE MySQL | 9030 | 30632 | SQL 连接 |
-| FE HTTP | 8030 | 30389 | Web UI |
-| FE RPC | 9010 | 32280 | FE 间通信 |
-| MinIO API | 9000 | 30000 | S3 API |
-| MinIO Console | 9001 | 30090 | Web Console |
-
-## 常见问题
-
-### 1. Operator 启动失败
+### FE 无法启动
 
 ```bash
-# 检查 Operator 状态
-kubectl get pods -n doris-operator-system
-kubectl logs -n doris-operator-system -l app.kubernetes.io/name=doris-operator
+# 查看 FE 日志
+kubectl logs -n doris deployment/doris-fe
 
-# 常见问题: 镜像拉取失败
-# 确保镜像已构建并推送到 Nexus
-docker images | grep doris
+# 检查环境变量是否正确
+kubectl describe pod -n doris -l app=doris,component=fe
 ```
 
-### 2. FDB 集群启动缓慢
+### BE 无法启动
 
 ```bash
-# FDB 初始化可能需要 5-10 分钟
-kubectl get fdbcluster -n foundationdb
-kubectl logs -n foundationdb -l app.kubernetes.io/name=foundationdb --tail=100
+# 查看 BE 日志
+kubectl logs -n doris deployment/doris-be
+
+# 检查 FE 是否就绪
+kubectl get pod -n doris -l app=doris,component=fe
 ```
 
-### 3. FE/BE 启动失败
+### FDB 无法启动
 
 ```bash
-# 查看日志
-kubectl logs -n doris -l app.kubernetes.io/component=fe --tail=100
-kubectl logs -n doris -l app.kubernetes.io/component=becn --tail=100
+# 查看 FDB 日志
+kubectl logs -n foundationdb fdb-single
 
-# 检查 events
-kubectl get events -n doris --sort-by='.lastTimestamp'
+# 检查 Pod 状态
+kubectl get pod -n foundationdb fdb-single
 ```
 
-### 4. 存储挂载问题
+## 下一步
 
-```bash
-# 确认 StorageClass 存在
-kubectl get storageclass
-
-# 确认 PVC 状态
-kubectl get pvc -n doris
-kubectl get pvc -n foundationdb
-```
-
-## 生产环境注意事项
-
-1. **资源**: 增加 FE/BECN 副本数到 3+
-2. **高可用**: 3 副本满足 Raft 协议要求
-3. **存储**: 使用云存储 (GCE PD / AWS EBS) 替代 host-path
-4. **监控**: 配置 Prometheus + Grafana
-5. **网络**: 使用 LoadBalancer 替代 NodePort
-
-## 扩展阅读
-
-- [Doris Operator 官方文档](https://github.com/apache/doris-operator)
-- [Doris 存算分离架构](https://doris.apache.org/zh-CN/docs/data-lake/doris-storage-compute-separation)
-- [FoundationDB 官方文档](https://apple.github.io/foundationdb/)
-- [MinIO 官方文档](https://min.io/docs)
+- [Doris 官方文档](https://doris.apache.org/docs/)
+- [Doris GitHub](https://github.com/apache/doris)

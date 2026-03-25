@@ -1,0 +1,103 @@
+# =============================================================================
+# ConfigMap 配置
+# =============================================================================
+# 作用: 存储 Doris 组件的非敏感配置
+#
+# 内容:
+#   - FE 配置 (fe.conf)
+#   - BE 配置 (be.conf)
+#   - MetaService 配置 (doris_cloud.conf)
+# =============================================================================
+
+---
+# FE ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fe-config
+  namespace: doris
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/component: fe
+    app.kubernetes.io/part-of: doris-disagg
+data:
+  fe.conf: |
+    # FE 配置
+    # 端口配置
+    http_port = 8030
+    rpc_port = 9010
+    query_port = 9030
+    edit_log_port = 9010
+
+    # JVM 配置
+    JAVA_OPTS = "-Xmx4g -Xms2g -XX:+UseG1GC"
+
+    # 元数据配置
+    metadata_failure_recovery = false
+    catalog = doris
+    enable_stale_read = true
+
+    # 日志配置
+    log_verbose_modules = *
+
+    # 连接配置
+    max_connections = 2048
+    wait_timeout = 86400
+
+---
+# BE ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: be-config
+  namespace: doris
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/component: becn
+    app.kubernetes.io/part-of: doris-disagg
+data:
+  be.conf: |
+    # BE 配置
+    # 端口配置
+    be_port = 9060
+    be_webserver_port = 8040
+    heartbeat_service_port = 9050
+    brpc_port = 9050
+    arrow_flight_sql_port = 9070
+
+    # JVM 配置
+    JAVA_OPTS = "-Xmx8g -Xms4g -XX:+UseG1GC"
+
+    # 存储配置
+    storage_root_path = /opt/doris/storage
+    max_tablet_data_size = 536870912
+
+    # Compaction 配置
+    cumulative_compaction_num_singleton_deltas = 5
+    base_compaction_num_singleton_deltas = 4
+    max_compaction_interval = 60
+
+    # 日志配置
+    sys_log_verbose_modules = *
+
+---
+# MetaService ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: metaservice-config
+  namespace: doris
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/component: meta-service
+    app.kubernetes.io/part-of: doris-disagg
+data:
+  doris_cloud.conf: |
+    # MetaService 配置
+    brpc_listen_port = 5000
+    brpc_num_threads = -1
+    log_level = info
+    log_dir = /var/log/doris
+    max_concurrency = 128
+    transaction_timeout = 300
+    tablet_meta_cache_size = 2147483648  # 2GB

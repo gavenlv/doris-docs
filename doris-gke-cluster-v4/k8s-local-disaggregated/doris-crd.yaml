@@ -1,0 +1,154 @@
+# =============================================================================
+# Doris CRD 定义
+# =============================================================================
+# 来源: https://github.com/apache/doris-operator
+# 版本: doris.apache.com/v1
+#
+# 注意: 这是简化版 CRD，仅包含必要的 schema 定义
+# 生产环境建议使用完整 CRD
+# =============================================================================
+
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: dorisclusters.doris.apache.com
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/component: operator
+spec:
+  group: doris.apache.com
+  names:
+    kind: DorisCluster
+    listKind: DorisClusterList
+    plural: dorisclusters
+    singular: doriscluster
+    shortNames:
+      - dcr
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              properties:
+                dorisVersion:
+                  type: string
+                feSpec:
+                  type: object
+                  properties:
+                    replicas:
+                      type: integer
+                    image:
+                      type: string
+                    imagePullPolicy:
+                      type: string
+                    resources:
+                      type: object
+                    storage:
+                      type: object
+                    configMapInfo:
+                      type: object
+                    service:
+                      type: object
+                    env:
+                      type: array
+                      items:
+                        type: object
+                    affinity:
+                      type: object
+                beSpec:
+                  type: object
+                  properties:
+                    replicas:
+                      type: integer
+                    image:
+                      type: string
+                    imagePullPolicy:
+                      type: string
+                    resources:
+                      type: object
+                    storage:
+                      type: object
+                    configMapInfo:
+                      type: object
+                    service:
+                      type: object
+                    env:
+                      type: array
+                      items:
+                        type: object
+                    affinity:
+                      type: object
+                brokerSpec:
+                  type: object
+                cnSpec:
+                  type: object
+            status:
+              type: object
+
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: dorisdisaggregatedclusters.doris.apache.com
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/component: operator
+spec:
+  group: doris.apache.com
+  names:
+    kind: DorisDisaggregatedCluster
+    listKind: DorisDisaggregatedClusterList
+    plural: dorisdisaggregatedclusters
+    singular: dorisdisaggregatedcluster
+    shortNames:
+      - ddcr
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              properties:
+                adminUser:
+                  type: object
+                fe:
+                  type: object
+                becn:
+                  type: object
+                metaService:
+                  type: object
+                storage:
+                  type: object
+                global:
+                  type: object
+                recovery:
+                  type: object
+                upgradePolicy:
+                  type: object
+                logging:
+                  type: object
+            status:
+              type: object

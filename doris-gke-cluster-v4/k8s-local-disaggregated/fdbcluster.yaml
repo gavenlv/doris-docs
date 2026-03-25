@@ -1,0 +1,116 @@
+# =============================================================================
+# FoundationDB 集群配置
+# =============================================================================
+# 作用: 定义 FoundationDB 集群，MetaService 的底层元数据存储
+# 版本: 7.1.37
+# 模式: 3 副本高可用
+#
+# 架构说明:
+#   FoundationDB 使用 Raft 协议进行数据复制:
+#   - 数据自动分布在多个节点
+#   - 任意 2 节点故障不影响服务
+# =============================================================================
+
+apiVersion: apps.foundationdb.org/v1beta1
+kind: FoundationDBCluster
+metadata:
+  name: fdb-cluster
+  namespace: foundationdb
+  labels:
+    app.kubernetes.io/name: foundationdb
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: doris-disagg
+spec:
+  # FoundationDB 版本
+  version: 7.1.37
+
+  # 镜像配置
+  image: foundationdb/foundationdb:7.1.37
+  imagePullPolicy: IfNotPresent
+
+  # ---------------------------------------------------------------------
+  # 进程数量配置
+  # ---------------------------------------------------------------------
+  processCounts:
+    # 存储进程: 存储数据
+    storage: 3
+    # 日志进程: 存储事务日志
+    log: 3
+    # 事务进程: 处理事务协调
+    transaction: 3
+
+  # ---------------------------------------------------------------------
+  # 数据库配置
+  # ---------------------------------------------------------------------
+  databaseConfiguration:
+    # 冗余模式: double (2 副本) / triple (3 副本)
+    redundancy_mode: triple
+    # 存储引擎: SSD-2 (推荐)
+    storage_engine: SSD-2
+    # 冲突解决策略: 1 (线性扫描)
+    conflict_resolution_policy: 1
+
+  # ---------------------------------------------------------------------
+  # 存储配置
+  # ---------------------------------------------------------------------
+  storageClass: standard
+
+  persistentVolumeClaimSpec:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 10Gi
+
+  # ---------------------------------------------------------------------
+  # 网络配置 (FQDN 模式)
+  # ---------------------------------------------------------------------
+  routing:
+    useDNSInClusterFile: true
+
+  # ---------------------------------------------------------------------
+  # Pod 配置
+  # ---------------------------------------------------------------------
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+      ephemeral-storage: 2Gi
+    limits:
+      cpu: 1
+      memory: 2Gi
+      ephemeral-storage: 5Gi
+
+  # Pod 反亲和性 (开发环境使用 development 模式)
+  podAntiAffinity:
+    mode: development
+
+  # 容忍
+  tolerations:
+    - key: "node.kubernetes.io/not-ready"
+      operator: "Exists"
+      effect: "NoExecute"
+      tolerationSeconds: 60
+    - key: "node.kubernetes.io/unreachable"
+      operator: "Exists"
+      effect: "NoExecute"
+      tolerationSeconds: 60
+
+  # ---------------------------------------------------------------------
+  # 日志配置
+  # ---------------------------------------------------------------------
+  logGroup: foundationdb
+  logLevel: INFO
+
+  # ---------------------------------------------------------------------
+  # 监控配置
+  # ---------------------------------------------------------------------
+  exportMetrics:
+    enabled: true
+  metricsPrefix: foundationdb
+
+  # ---------------------------------------------------------------------
+  # 升级策略
+  # ---------------------------------------------------------------------
+  minimumUptimeSecondsBeforeRestart: 60
+  podManagementPolicy: Parallel

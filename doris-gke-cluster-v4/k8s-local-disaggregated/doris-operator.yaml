@@ -1,0 +1,176 @@
+# =============================================================================
+# Doris Operator 部署配置
+# =============================================================================
+# 作用: 管理 DorisDisaggregatedCluster 的生命周期
+# 版本: apache/doris:operator-1.4.0
+#
+# 前置条件:
+#   - Doris Operator 镜像已加载: apache/doris:operator-1.4.0
+#   - CRD 已部署
+#
+# 部署顺序:
+#   kubectl apply -f doris-operator.yaml
+# =============================================================================
+
+---
+# Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: doris-operator-system
+---
+# ServiceAccount
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: doris-operator
+  namespace: doris-operator-system
+---
+# ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: doris-operator
+rules:
+  # 管理 ConfigMaps, Pods, Services 等
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - endpoints
+      - events
+      - persistentvolumeclaims
+      - pods
+      - podtemplates
+      - secrets
+      - services
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # 管理 Deployments, StatefulSets, DaemonSets
+  - apiGroups:
+      - apps
+    resources:
+      - daemonsets
+      - deployments
+      - deployments/finalizers
+      - replicasets
+      - statefulsets
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # 管理 ControllerRevisions
+  - apiGroups:
+      - apps
+    resources:
+      - controllerrevisions
+    verbs:
+      - get
+      - list
+      - watch
+  # 管理 Leases
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  # 管理 DorisCluster CRD (doris.apache.com)
+  - apiGroups:
+      - doris.apache.com
+    resources:
+      - "*"
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - doris.apache.com
+    resources:
+      - "*/finalizers"
+    verbs:
+      - update
+  - apiGroups:
+      - doris.apache.com
+    resources:
+      - "*/status"
+    verbs:
+      - get
+      - patch
+      - update
+---
+# ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: doris-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: doris-operator
+subjects:
+  - kind: ServiceAccount
+    name: doris-operator
+    namespace: doris-operator-system
+---
+# Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: doris-operator
+  namespace: doris-operator-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: doris-operator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: doris-operator
+    spec:
+      serviceAccountName: doris-operator
+      containers:
+        - name: operator
+          # 使用本地镜像 apache/doris:operator-1.4.0
+          image: apache/doris:operator-1.4.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: metrics
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          env:
+            - name: WATCH_NAMESPACE
+              value: ""
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: OPERATOR_NAME
+              value: doris-operator

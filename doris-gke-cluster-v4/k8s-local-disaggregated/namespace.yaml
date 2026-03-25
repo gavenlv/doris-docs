@@ -1,0 +1,33 @@
+# =============================================================================
+# Namespace 定义
+# =============================================================================
+
+---
+# Doris 命名空间
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: doris
+  labels:
+    app.kubernetes.io/name: doris
+    app.kubernetes.io/managed-by: kubectl
+
+---
+# FoundationDB 命名空间 (如果尚未创建)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: foundationdb
+  labels:
+    app.kubernetes.io/name: foundationdb
+    app.kubernetes.io/managed-by: kubectl
+
+---
+# Doris Operator 命名空间
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: doris-operator-system
+  labels:
+    app.kubernetes.io/name: doris-operator
+    app.kubernetes.io/managed-by: kubectl
