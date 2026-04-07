@@ -1,0 +1,176 @@
+# ============================================================
+# Doris BE High-Performance Configuration Template
+# ============================================================
+# Target: 100 billion rows, 50 billion rows/2min import
+#         10s query latency, 50 concurrent users
+# ============================================================
+
+# ============================================================
+# Network Configuration
+# ============================================================
+PPROF_PORT = 8040
+HEARTBEAT_SERVICE_PORT = 9050
+BACKEND_PORT = 9060
+BRPC_PORT = 8060
+priority_networks = 10.0.0.0/8
+
+# ============================================================
+# Memory Configuration
+# ============================================================
+# Memory limit for BE process (80% of total memory for 128GB machine)
+mem_limit = 100GB
+
+# Memory limit per thread for schema change
+memory_limitation_per_thread_for_schema_change = 4294967296
+
+# Query memory limit
+query_memory_limit = 80GB
+
+# Storage page cache limit
+storage_page_cache_limit = 40GB
+enable_storage_page_cache = true
+
+# Enable memory overcommit for better utilization
+enable_query_memory_overcommit = true
+
+# ============================================================
+# Thread Pool Configuration
+# ============================================================
+# Scan thread pool
+scan_thread_pool_thread_num = 64
+scan_thread_pool_queue_size = 102400
+
+# Fragment pool
+fragment_pool_thread_num_min = 64
+fragment_pool_thread_num_max = 256
+fragment_pool_queue_size = 2048
+
+# Scanner thread pool
+scanner_thread_pool_thread_num = 64
+scanner_thread_pool_queue_size = 2048
+
+# ============================================================
+# Compaction Configuration
+# ============================================================
+# Base compaction threads
+base_compaction_num_threads_per_disk = 32
+
+# Cumulative compaction threads
+cumulative_compaction_num_threads_per_disk = 32
+
+# Compaction tasks per disk
+compaction_task_num_per_disk = 4
+compaction_task_num_per_fast_disk = 8
+
+# Max cumulative compaction deltas
+max_cumulative_compaction_num_singleton_deltas = 1000
+
+# Compaction trace threshold (seconds)
+compaction_trace_threshold = 60
+
+# Enable segcompaction for large segments
+enable_segcompaction = true
+segcompaction_segment_max_rows = 1000000
+
+# ============================================================
+# Storage Configuration
+# ============================================================
+# Storage path (use Local SSD for best performance)
+storage_root_path = /opt/doris/be/storage
+
+# Rowset type
+default_rowset_type = beta
+
+# Enable write page cache
+enable_write_page_cache = true
+
+# Segment delta column index
+enable_segcompaction = true
+
+# ============================================================
+# Import Configuration
+# ============================================================
+# Max streaming load size (10GB)
+streaming_load_max_mb = 10240
+
+# Streaming load RPC alive time (20 minutes)
+streaming_load_rpc_max_alive_time_sec = 1200
+
+# Max send batch parallelism
+max_send_batch_parallelism_per_job = 20
+
+# Load thread pool
+load_thread_pool_size = 64
+
+# Scan range and scanner config
+doris_scan_range_row_count = 500000
+doris_scanner_row_num = 500000
+doris_scanner_thread_pool_thread_num = 64
+
+# Push write config
+push_write_mbytes_per_sec = 100
+
+# ============================================================
+# Query Configuration
+# ============================================================
+# Enable prefetch
+enable_prefetch = true
+
+# Enable scan block cache
+enable_scan_block_cache = true
+
+# Number of scanner threads
+num_scanner_threads = 64
+
+# Threads per core
+num_threads_per_core = 4
+
+# Enable parallel scan
+enable_parallel_scan = true
+
+# ============================================================
+# Performance Tuning
+# ============================================================
+# Enable bitmap union disk format
+enable_bitmap_union_disk_format_with_set = true
+
+# Enable low cardinality optimize
+enable_low_cardinality_optimize = true
+
+# Enable storage vectorization
+enable_storage_vectorization = true
+
+# Enable batch delete
+enable_batch_delete = true
+
+# ============================================================
+# Logging Configuration
+# ============================================================
+sys_log_dir = /opt/doris/be/log
+sys_log_roll_mode = SIZE-MB-1024
+sys_log_roll_num = 10
+sys_log_level = INFO
+sys_log_enable_trace_log = false
+sys_log_verbose_modules = 
+sys_log_verbose_level = 10
+
+# ============================================================
+# Cluster Configuration
+# ============================================================
+heartbeat_interval_second = 10
+heartbeat_timeout_second = 30
+check_java_version = false
+enable_https = false
+enable_auth = true
+enable_bdbje_debug_mode = false
+meta_delay_toleration_second = 10
+enable_token_check = true
+enable_deploy_manager = true
+
+# ============================================================
+# Compute-Storage Separation (Optional)
+# ============================================================
+# Enable cold storage separation
+# enable_storage_cold_separation = true
+# cold_storage_default_policy = "cold"
+# storage_cooldown_time = "7 DAY"

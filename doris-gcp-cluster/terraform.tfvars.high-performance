@@ -1,0 +1,121 @@
+# ============================================================
+# Doris High-Performance Cluster Configuration
+# ============================================================
+# Target: 100 billion rows, 50 billion rows/2min import
+#         10s query latency, 50 concurrent users
+# ============================================================
+
+# Required: GCP Project ID
+project_id = "your-project-id"
+
+# Required: Path to your SSH public key
+ssh_public_key_path = "~/.ssh/id_rsa.pub"
+
+# GCP Region and Zone
+region = "us-central1"
+zone = "us-central1-a"
+
+# Cluster Configuration
+cluster_name = "doris-hp"
+environment = "prod"
+
+# Network Configuration
+subnet_cidr = "10.10.0.0/16"
+allowed_source_ranges = ["10.0.0.0/8"]
+
+# ============================================================
+# FE Configuration - High Availability
+# ============================================================
+fe_count = 3
+fe_machine_type = "n2-standard-8"
+fe_disk_size = 100
+fe_disk_type = "pd-ssd"
+fe_preemptible = false
+
+# ============================================================
+# BE Configuration - High Performance
+# ============================================================
+# Core BE nodes (non-preemptible, always available)
+be_count = 5
+be_machine_type = "c2-standard-30"
+be_disk_size = 375
+be_disk_type = "local-ssd"
+be_preemptible = false
+
+# ============================================================
+# High-Performance Specific Settings
+# ============================================================
+enable_high_performance = true
+
+# Local SSD Configuration
+enable_local_ssd = true
+local_ssd_count = 8
+
+# Preemptible BE for cost optimization
+enable_preemptible_be_pool = true
+preemptible_be_count = 15
+preemptible_be_machine_type = "c2-standard-30"
+
+# ============================================================
+# Auto Scaling Configuration
+# ============================================================
+enable_autoscaling = true
+be_min_count = 5
+be_max_count = 30
+autoscaling_cpu_target = 50
+autoscaling_scale_up_cooldown = 180
+autoscaling_scale_down_cooldown = 600
+
+# Time-based scaling
+enable_time_based_scaling = true
+busy_hours_start = "08:00"
+busy_hours_end = "22:00"
+busy_hours_be_count = 25
+off_hours_be_count = 8
+
+# ============================================================
+# Compute-Storage Separation
+# ============================================================
+enable_compute_storage_separation = true
+gcs_bucket_name = "doris-hp-cold-storage"
+hot_storage_type = "local-ssd"
+hot_storage_size = 3000
+cold_storage_retention_days = 30
+
+# ============================================================
+# Load Balancer
+# ============================================================
+enable_load_balancer = true
+
+# ============================================================
+# FE Servers Configuration
+# ============================================================
+fe_servers = "fe1:10.10.0.11:9010,fe2:10.10.0.12:9010,fe3:10.10.0.13:9010"
+
+# ============================================================
+# Performance Tuning Parameters
+# ============================================================
+be_memory_limit = "100GB"
+be_query_memory_limit = "80GB"
+be_storage_page_cache_limit = "40GB"
+be_scan_thread_pool_thread_num = 64
+be_fragment_pool_thread_num_max = 256
+be_compaction_thread_num = 32
+
+fe_query_timeout = 600
+fe_max_running_query_num = 200
+fe_query_cache_capacity = "20GB"
+
+# ============================================================
+# Import Optimization
+# ============================================================
+streaming_load_max_mb = 10240
+streaming_load_rpc_max_alive_time_sec = 1200
+max_send_batch_parallelism_per_job = 20
+
+# ============================================================
+# Monitoring and Logging
+# ============================================================
+enable_monitoring = true
+log_level = "INFO"
+audit_log_enabled = true

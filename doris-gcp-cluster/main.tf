@@ -221,7 +221,7 @@ resource "google_compute_instance_from_template" "fe_instances" {
 }
 
 # ============================================================
-# BE Instance Template
+# BE Instance Template (Standard)
 # ============================================================
 
 resource "google_compute_instance_template" "be_template" {
@@ -239,6 +239,13 @@ resource "google_compute_instance_template" "be_template" {
     }
   }
 
+  dynamic "scratch_disk" {
+    for_each = var.enable_local_ssd ? range(var.local_ssd_count) : []
+    content {
+      interface = "NVME"
+    }
+  }
+
   network_interface {
     subnetwork = google_compute_subnetwork.doris_subnet.id
     access_config {
@@ -248,13 +255,26 @@ resource "google_compute_instance_template" "be_template" {
 
   metadata = {
     ssh-keys = "${var.ssh_user}:${file(var.ssh_public_key_path)}"
+    enable-local-ssd = var.enable_local_ssd ? "true" : "false"
+    local-ssd-count  = var.enable_local_ssd ? tostring(var.local_ssd_count) : "0"
     user-data = templatefile("${path.module}/user-data-be.sh", {
-      cluster_name       = var.cluster_name
-      environment        = var.environment
-      fe_servers         = var.fe_servers
-      be_id              = "0"
-      gcs_bucket        = var.enable_compute_storage_separation ? var.gcs_bucket_name : ""
-      enable_separation  = var.enable_compute_storage_separation
+      cluster_name              = var.cluster_name
+      environment               = var.environment
+      fe_servers                = var.fe_servers
+      be_id                     = "0"
+      gcs_bucket                = var.enable_compute_storage_separation ? var.gcs_bucket_name : ""
+      enable_separation         = var.enable_compute_storage_separation
+      enable_local_ssd          = var.enable_local_ssd
+      local_ssd_count           = var.local_ssd_count
+      be_memory_limit           = var.be_memory_limit
+      be_query_memory_limit     = var.be_query_memory_limit
+      be_storage_page_cache_limit = var.be_storage_page_cache_limit
+      be_scan_thread_pool_thread_num = var.be_scan_thread_pool_thread_num
+      be_fragment_pool_thread_num_max = var.be_fragment_pool_thread_num_max
+      be_compaction_thread_num  = var.be_compaction_thread_num
+      streaming_load_max_mb     = var.streaming_load_max_mb
+      streaming_load_rpc_max_alive_time_sec = var.streaming_load_rpc_max_alive_time_sec
+      log_level                 = var.log_level
     })
   }
 
@@ -264,6 +284,114 @@ resource "google_compute_instance_template" "be_template" {
 
   lifecycle {
     create_before_destroy = true
+  }
+}
+
+# ============================================================
+# BE Instance Template (Preemptible Pool for Cost Optimization)
+# ============================================================
+
+resource "google_compute_instance_template" "be_preemptible_template" {
+  count = var.enable_preemptible_be_pool ? 1 : 0
+
+  name_prefix  = "${local.cluster_name}-be-preemptible-"
+  machine_type = var.preemptible_be_machine_type
+  region       = var.region
+
+  tags = ["doris-be", "doris-be-preemptible", local.cluster_name]
+
+  boot_disk {
+    initialize_params {
+      image = var.image_family
+      size  = 50
+      type  = "pd-balanced"
+    }
+  }
+
+  dynamic "scratch_disk" {
+    for_each = var.enable_local_ssd ? range(var.local_ssd_count) : []
+    content {
+      interface = "NVME"
+    }
+  }
+
+  network_interface {
+    subnetwork = google_compute_subnetwork.doris_subnet.id
+    access_config {
+      network_tier = "PREMIUM"
+    }
+  }
+
+  metadata = {
+    ssh-keys = "${var.ssh_user}:${file(var.ssh_public_key_path)}"
+    enable-local-ssd = var.enable_local_ssd ? "true" : "false"
+    local-ssd-count  = var.enable_local_ssd ? tostring(var.local_ssd_count) : "0"
+    user-data = templatefile("${path.module}/user-data-be.sh", {
+      cluster_name              = var.cluster_name
+      environment               = var.environment
+      fe_servers                = var.fe_servers
+      be_id                     = "0"
+      gcs_bucket                = var.enable_compute_storage_separation ? var.gcs_bucket_name : ""
+      enable_separation         = var.enable_compute_storage_separation
+      enable_local_ssd          = var.enable_local_ssd
+      local_ssd_count           = var.local_ssd_count
+      be_memory_limit           = var.be_memory_limit
+      be_query_memory_limit     = var.be_query_memory_limit
+      be_storage_page_cache_limit = var.be_storage_page_cache_limit
+      be_scan_thread_pool_thread_num = var.be_scan_thread_pool_thread_num
+      be_fragment_pool_thread_num_max = var.be_fragment_pool_thread_num_max
+      be_compaction_thread_num  = var.be_compaction_thread_num
+      streaming_load_max_mb     = var.streaming_load_max_mb
+      streaming_load_rpc_max_alive_time_sec = var.streaming_load_rpc_max_alive_time_sec
+      log_level                 = var.log_level
+    })
+  }
+
+  scheduling {
+    preemptible       = true
+    automatic_restart = false
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# ============================================================
+# Preemptible BE Instance Group Manager
+# ============================================================
+
+resource "google_compute_region_instance_group_manager" "be_preemptible_igm" {
+  count  = var.enable_preemptible_be_pool ? 1 : 0
+  name   = "${local.cluster_name}-be-preemptible-igm"
+  region = var.region
+  version {
+    instance_template = google_compute_instance_template.be_preemptible_template[0].id
+  }
+
+  base_instance_name = "${local.cluster_name}-be-preemptible"
+  target_size        = var.preemptible_be_count
+
+  named_port {
+    name = "http"
+    port = 8040
+  }
+
+  named_port {
+    name = "heartbeat"
+    port = 9050
+  }
+
+  auto_healing_policies {
+    health_check      = google_compute_health_check.be_health_check[0].id
+    initial_delay_sec = 300
+  }
+
+  update_policy {
+    type                  = "PROACTIVE"
+    minimal_action        = "REPLACE"
+    max_surge_fixed       = 2
+    max_unavailable_fixed = 1
   }
 }
 

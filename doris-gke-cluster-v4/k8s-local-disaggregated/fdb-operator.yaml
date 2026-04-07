@@ -206,8 +206,8 @@ spec:
       serviceAccountName: foundationdb-kubernetes-operator
       containers:
         - name: operator
-          # 注意: 需要本地镜像 fdb-kubernetes-operator:1.12.0
-          image: fdb-kubernetes-operator:1.12.0
+          # 注意: 需要本地镜像 foundationdb/fdb-kubernetes-operator:1.12.0
+          image: foundationdb/fdb-kubernetes-operator:1.12.0
           imagePullPolicy: Never
           ports:
             - name: metrics

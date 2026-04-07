@@ -204,3 +204,183 @@ variable "enable_load_balancer" {
   type        = bool
   default     = false
 }
+
+# ============================================================
+# High-Performance Configuration
+# ============================================================
+
+variable "enable_high_performance" {
+  description = "Enable high-performance mode with optimized settings"
+  type        = bool
+  default     = false
+}
+
+variable "enable_local_ssd" {
+  description = "Use Local SSD for BE storage (NVMe, 375GB each)"
+  type        = bool
+  default     = false
+}
+
+variable "local_ssd_count" {
+  description = "Number of Local SSDs per BE instance (max 8)"
+  type        = number
+  default     = 1
+  validation {
+    condition     = var.local_ssd_count >= 1 && var.local_ssd_count <= 8
+    error_message = "Local SSD count must be between 1 and 8."
+  }
+}
+
+variable "enable_preemptible_be_pool" {
+  description = "Enable separate preemptible BE pool for cost optimization"
+  type        = bool
+  default     = false
+}
+
+variable "preemptible_be_count" {
+  description = "Number of preemptible BE instances"
+  type        = number
+  default     = 0
+}
+
+variable "preemptible_be_machine_type" {
+  description = "Machine type for preemptible BE instances"
+  type        = string
+  default     = "c2-standard-30"
+}
+
+variable "enable_time_based_scaling" {
+  description = "Enable time-based auto scaling"
+  type        = bool
+  default     = false
+}
+
+variable "busy_hours_start" {
+  description = "Start time for busy hours (HH:MM format)"
+  type        = string
+  default     = "08:00"
+}
+
+variable "busy_hours_end" {
+  description = "End time for busy hours (HH:MM format)"
+  type        = string
+  default     = "22:00"
+}
+
+variable "busy_hours_be_count" {
+  description = "BE count during busy hours"
+  type        = number
+  default     = 15
+}
+
+variable "off_hours_be_count" {
+  description = "BE count during off hours"
+  type        = number
+  default     = 5
+}
+
+# ============================================================
+# BE Performance Tuning Variables
+# ============================================================
+
+variable "be_memory_limit" {
+  description = "BE process memory limit"
+  type        = string
+  default     = "80%"
+}
+
+variable "be_query_memory_limit" {
+  description = "BE query memory limit per query"
+  type        = string
+  default     = "50GB"
+}
+
+variable "be_storage_page_cache_limit" {
+  description = "BE storage page cache limit"
+  type        = string
+  default     = "20GB"
+}
+
+variable "be_scan_thread_pool_thread_num" {
+  description = "BE scan thread pool size"
+  type        = number
+  default     = 48
+}
+
+variable "be_fragment_pool_thread_num_max" {
+  description = "BE fragment pool max thread count"
+  type        = number
+  default     = 128
+}
+
+variable "be_compaction_thread_num" {
+  description = "BE compaction thread count"
+  type        = number
+  default     = 16
+}
+
+# ============================================================
+# FE Performance Tuning Variables
+# ============================================================
+
+variable "fe_query_timeout" {
+  description = "FE query timeout in seconds"
+  type        = number
+  default     = 300
+}
+
+variable "fe_max_running_query_num" {
+  description = "FE max running query number"
+  type        = number
+  default     = 100
+}
+
+variable "fe_query_cache_capacity" {
+  description = "FE query cache capacity"
+  type        = string
+  default     = "10GB"
+}
+
+# ============================================================
+# Import Optimization Variables
+# ============================================================
+
+variable "streaming_load_max_mb" {
+  description = "Max size in MB for streaming load"
+  type        = number
+  default     = 10240
+}
+
+variable "streaming_load_rpc_max_alive_time_sec" {
+  description = "Max alive time in seconds for streaming load RPC"
+  type        = number
+  default     = 1200
+}
+
+variable "max_send_batch_parallelism_per_job" {
+  description = "Max send batch parallelism per job"
+  type        = number
+  default     = 10
+}
+
+# ============================================================
+# Monitoring Configuration
+# ============================================================
+
+variable "enable_monitoring" {
+  description = "Enable Prometheus/Grafana monitoring"
+  type        = bool
+  default     = true
+}
+
+variable "log_level" {
+  description = "Log level (INFO, WARN, ERROR, DEBUG)"
+  type        = string
+  default     = "INFO"
+}
+
+variable "audit_log_enabled" {
+  description = "Enable audit logging"
+  type        = bool
+  default     = true
+}

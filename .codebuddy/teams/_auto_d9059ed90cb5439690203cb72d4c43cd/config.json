@@ -1,0 +1,48 @@
+{
+  "name": "_auto_d9059ed90cb5439690203cb72d4c43cd",
+  "leadAgentId": "d9059ed90cb5439690203cb72d4c43cd",
+  "workspacePath": "d:\\workspace\\github\\doris-docs",
+  "createdAt": "2026-04-02T14:47:14.698Z",
+  "options": {
+    "workspacePath": "d:\\workspace\\github\\doris-docs",
+    "isAutoTeam": true
+  },
+  "members": [
+    {
+      "memberId": "team-lead@_auto_d9059ed90cb5439690203cb72d4c43cd",
+      "name": "team-lead",
+      "role": "Team Lead - coordinates the team and interacts with the user"
+    },
+    {
+      "memberId": "foundation-writer@_auto_d9059ed90cb5439690203cb72d4c43cd",
+      "name": "foundation-writer",
+      "role": "Create chapters 00-04 foundation"
+    },
+    {
+      "memberId": "ddl-writer@_auto_d9059ed90cb5439690203cb72d4c43cd",
+      "name": "ddl-writer",
+      "role": "Create chapters 05-07 DDL"
+    },
+    {
+      "memberId": "dataops-writer@_auto_d9059ed90cb5439690203cb72d4c43cd",
+      "name": "dataops-writer",
+      "role": "Create chapters 08-10 data ops"
+    },
+    {
+      "memberId": "analytics-writer@_auto_d9059ed90cb5439690203cb72d4c43cd",
+      "name": "analytics-writer",
+      "role": "Create chapters 11-13 analytics"
+    },
+    {
+      "memberId": "advanced-writer@_auto_d9059ed90cb5439690203cb72d4c43cd",
+      "name": "advanced-writer",
+      "role": "Create chapters 14-18 advanced"
+    },
+    {
+      "memberId": "ops-writer@_auto_d9059ed90cb5439690203cb72d4c43cd",
+      "name": "ops-writer",
+      "role": "Create chapters 19-23 operations"
+    }
+  ],
+  "isAutoTeam": true
+}

@@ -1,0 +1,218 @@
+# ============================================================
+# Doris FE High-Performance Configuration Template
+# ============================================================
+# Target: 100 billion rows, 50 billion rows/2min import
+#         10s query latency, 50 concurrent users
+# ============================================================
+
+# ============================================================
+# Meta Configuration
+# ============================================================
+meta_dir = /opt/doris/fe/doris-meta
+
+# ============================================================
+# Network Configuration
+# ============================================================
+edit_log_port = 9010
+http_port = 8030
+query_port = 9030
+rpc_port = 9020
+arrow_flight_sql_port = -1
+priority_networks = 10.0.0.0/8
+
+# ============================================================
+# JVM Configuration
+# ============================================================
+# For 32GB memory machine
+JAVA_OPTS = "-Xmx16g -Xms16g -Xmn8g -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:+PrintGCDateStamps -XX:+PrintGCDetails -Xloggc:log/fe.gc.log"
+
+# ============================================================
+# Query Configuration
+# ============================================================
+# Query timeout (10 minutes)
+query_timeout = 600
+
+# Max running query number
+max_running_query_num = 200
+
+# Max concurrent queries per user
+max_concurrent_queries_per_user = 100
+
+# Query cache capacity
+query_cache_capacity = 20GB
+enable_query_cache = true
+
+# ============================================================
+# Load Configuration
+# ============================================================
+# Max load timeout (1 hour)
+max_load_timeout_second = 3600
+
+# Max stream load timeout (20 minutes)
+max_stream_load_timeout_second = 1200
+
+# Default load parallelism
+default_load_parallelism = 16
+
+# Min and max bytes per broker scanner
+min_bytes_per_broker_scanner = 67108864
+max_bytes_per_broker_scanner = 2147483648
+
+# Max broker concurrency
+max_broker_concurrency = 256
+
+# ============================================================
+# Memory Configuration
+# ============================================================
+# Max query memory (8GB per query)
+max_query_memory = 8589934592
+
+# Memory limit per query instance
+memory_limitation_per_thread_for_schema_change = 4294967296
+
+# ============================================================
+# Scheduler Configuration
+# ============================================================
+# Max pending task per BE
+max_pending_task_num_per_be = 1000
+
+# Schedule slot num per path
+schedule_slot_num_per_path = 8
+
+# ============================================================
+# Statistics Configuration
+# ============================================================
+# Enable statistics collection
+enable_statistics_collection = true
+
+# Statistics collection interval
+statistics_collection_interval = 3600
+
+# ============================================================
+# External Table Configuration
+# ============================================================
+# Max external cache capacity
+max_external_cache_loader_thread_pool_size = 16
+external_cache_expire_time_minutes_after_access = 30
+
+# ============================================================
+# Audit Log Configuration
+# ============================================================
+# Enable audit log
+enable_audit_log = true
+
+# Audit log dir
+audit_log_dir = log
+
+# Audit log roll mode
+audit_log_roll_num = 50
+audit_log_modules = "slow_query,query,load,stream_load"
+
+# Slow query log threshold (ms)
+slow_query_log_threshold = 5000
+
+# ============================================================
+# Dynamic Partition Configuration
+# ============================================================
+# Enable dynamic partition
+dynamic_partition_enable = true
+
+# Dynamic partition check interval
+dynamic_partition_check_interval_seconds = 300
+
+# ============================================================
+# Transaction Configuration
+# ============================================================
+# Max running transactions
+max_running_txn_num_per_db = 1000
+
+# Transaction timeout
+transaction_clean_interval_second = 30
+
+# ============================================================
+# Tablet Configuration
+# ============================================================
+# Max tablet num per BE
+max_tablet_num_per_be = 100000
+
+# Tablet checker interval
+tablet_checker_interval_second = 60
+
+# ============================================================
+# Backup Configuration
+# ============================================================
+# Backup job timeout
+backup_job_default_timeout_ms = 86400000
+
+# ============================================================
+# Replication Configuration
+# ============================================================
+# Max replica num per tablet
+max_replica_num_per_tablet = 10000
+
+# Default replication num
+default_replication_num = 3
+
+# Min replication num
+min_replication_num_per_tablet = 2
+
+# ============================================================
+# HTTP Configuration
+# ============================================================
+# HTTP handler count
+http_handler_count = 64
+
+# HTTP max header size
+http_max_header_size = 8192
+
+# HTTP max body size (100MB)
+http_max_body_size = 104857600
+
+# ============================================================
+# Logging Configuration
+# ============================================================
+sys_log_dir = log
+sys_log_roll_mode = SIZE-MB-1024
+sys_log_roll_num = 10
+sys_log_level = INFO
+sys_log_verbose_modules = 
+sys_log_verbose_level = 10
+
+# ============================================================
+# Cluster Configuration
+# ============================================================
+# Enable deploy manager
+enable_deploy_manager = true
+
+# Metadata delay tolerance
+meta_delay_toleration_second = 10
+
+# Enable token check
+enable_token_check = true
+
+# ============================================================
+# Performance Tuning
+# ============================================================
+# Enable cost based join reorder
+enable_cost_based_join_reorder = true
+
+# Enable pipeline engine
+enable_pipeline_engine = true
+
+# Runtime filter mode
+runtime_filter_mode = GLOBAL
+
+# Runtime filter wait time
+runtime_filter_wait_time_ms = 2000
+
+# Parallel fragment exec instance num
+parallel_fragment_exec_instance_num = 8
+
+# ============================================================
+# Colocate Group Configuration
+# ============================================================
+# Enable colocate join
+enable_colocate_join = true
+
+# Colocate group rebalance delay
+colocate_group_rebalance_delay_second = 300
